@@ -1,0 +1,26 @@
+// OpenCode configuration — deployed to %USERPROFILE%/.config/opencode.jsonc
+// Overrides the default OpenCode settings for the air-gapped environment.
+//
+// Docs: https://opencode.ai/docs/
+// Edit this file to match your preferred model provider and API key.
+{
+  // --- Provider (adjust to your model provider) ---
+  // Supported: anthropic, openai, azure, copilot, ollama, etc.
+  "provider": "anthropic",
+
+  // --- Model ---
+  "model": "claude-sonnet-4-20250514",
+
+  // --- Theme ---
+  "theme": "dark",
+
+  // --- Approval mode ---
+  // "suggest" = ask before file changes, "auto" = apply changes automatically
+  "approvalMode": "suggest",
+
+  // --- Custom instructions (optional) ---
+  "instructions": "You are working in an air-gapped Windows Server environment. All artifacts are sourced internally from MinIO, Harbor, or NTFS shares. There is no internet access. Security hardening is NOT a priority — prefer simplicity and performance.",
+
+  // --- MCP servers (optional) ---
+  "mcpServers": {}
+}

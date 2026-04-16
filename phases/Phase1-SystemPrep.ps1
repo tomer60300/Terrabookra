@@ -116,6 +116,29 @@ function Invoke-Phase1 {
         if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
     } else { Write-Log 'Hyper-V: already installed' }
 
+    # ── 1.10 Import self-signed certificates ─────────────────
+    Write-Log '1.10 Import self-signed certificates'
+    $importScript = Join-Path $Script:ScriptRoot 'scripts\Import-Certificates.ps1'
+    if (Test-Path $importScript) {
+        & $importScript -CertsDir $Script:Config.CertsDir 2>&1 | ForEach-Object { Write-Log "  certs: $_" }
+    } else {
+        Write-LogWarn 'Import-Certificates.ps1 not found — skipping cert import'
+    }
+
+    # ── 1.11 Enable WinRM (remote PowerShell) ────────────────
+    Write-Log '1.11 Enable WinRM for remote PowerShell'
+    $winrmScript = Join-Path $Script:ScriptRoot 'scripts\Enable-RemotePowerShell.ps1'
+    if (Test-Path $winrmScript) {
+        & $winrmScript 2>&1 | ForEach-Object { Write-Log "  winrm: $_" }
+    } else {
+        Write-LogWarn 'Enable-RemotePowerShell.ps1 not found — skipping WinRM setup'
+    }
+
+    # ── 1.12 Enable RDP audit policy ─────────────────────────
+    Write-Log '1.12 Enable RDP logon audit policy'
+    auditpol /set /subcategory:"Logon" /success:enable /failure:enable 2>$null
+    Write-Log 'Logon audit policy enabled'
+
     # ── Mark + dispatch ──────────────────────────────────────
     Set-PhaseMarker $Script:Config.Phase1Marker
     Write-Log '========== PHASE 1 COMPLETE =========='

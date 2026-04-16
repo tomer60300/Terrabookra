@@ -6,6 +6,50 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.1.0] — 2026-04-16
+
+### Added — 6 new features
+
+1. **Certificate import** (`scripts/Import-Certificates.ps1`)
+   - Imports `.crt/.cer/.pem` files from `C:\GitLab-Runner\certs\` into Local Machine Trusted Root store
+   - Skips already-trusted certs, logs thumbprints
+   - TLS bypasses remain as fallback (belt and suspenders)
+
+2. **Remote PowerShell** (`scripts/Enable-RemotePowerShell.ps1`)
+   - Enables WinRM PSRemoting with auto-start
+   - Configures TrustedHosts, firewall rules, memory limits
+   - Integrated into Phase 1 (step 1.11)
+
+3. **OpenCode Desktop** (`tools/opencode/opencode.jsonc`)
+   - Config template for air-gapped environment
+   - S3 key added for Windows installer download
+   - Added to Internet PC checklist
+
+4. **Network connectivity monitor** (`scripts/Test-NetworkConnectivity.ps1`)
+   - Tests TCP to GitLab, Harbor, MinIO, Artifactory, Be1 every 2 minutes
+   - Daily CSV logs with timestamp + latency for correlation with job failures
+   - 30-day auto-rotation
+
+5. **Job wrapper logging** (`scripts/Write-JobLog.ps1`)
+   - `pre_build_script` / `post_build_script` in config.toml
+   - Logs job start/end with: timestamp, job name, ID, pipeline, user, status, duration
+   - Daily files with 30-day rotation
+
+6. **RDP audit log** (`scripts/Export-RdpAuditLog.ps1`)
+   - Parses TerminalServices + Security event logs for RDP sessions
+   - Logs: timestamp, IP, username, logon/logoff/disconnect/reconnect
+   - Runs every 5 minutes, 30-day rotation
+   - Audit policy enabled in Phase 1 (step 1.12)
+
+### Changed
+- `lib/Config.ps1` — added CertsDir, JobLogDir, NetLogDir, RdpLogDir, MonitorHosts, S3KeysExtra
+- `phases/Phase1-SystemPrep.ps1` — added steps 1.10 (certs), 1.11 (WinRM), 1.12 (audit policy)
+- `phases/Phase3-RunnerSetup.ps1` — deploys new scripts, creates log subdirectories, job wrapper in config.toml
+- `scripts/Register-ScheduledTasks.ps1` — 10 → 12 tasks (+ Network-Connectivity-Monitor, RDP-Audit-Logger)
+- `config.toml` template — added `pre_build_script` and `post_build_script` for job logging
+
+---
+
 ## [2.0.0] — 2026-04-16
 
 ### Changed

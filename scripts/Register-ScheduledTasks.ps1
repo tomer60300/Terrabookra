@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Run once during Phase 3 of Install-GitLabRunner.ps1.
-    Creates 10 scheduled tasks under SYSTEM for Docker cleanup, disk monitoring,
-    service watchdogs, and log rotation.
+    Creates 12 scheduled tasks under SYSTEM for Docker cleanup, disk monitoring,
+    service watchdogs, log rotation, network monitoring, and RDP audit.
 
 .NOTES
     All tasks run as SYSTEM with highest privileges.
@@ -22,6 +22,8 @@
       Docker-Daemon-Watchdog      Every  5 minutes
       Runner-Service-Watchdog     Every  5 minutes
       Log-Rotation                Weekly Sunday 05:00
+      Network-Connectivity-Monitor Every  2 minutes
+      RDP-Audit-Logger            Every  5 minutes
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -82,6 +84,17 @@ $tasks = @(
         Name    = 'Log-Rotation'
         Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00'
         Args    = "-NoProfile -Command `"Get-ChildItem 'C:\GitLab-Runner\logs\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`""
+    },
+    # ── New feature tasks ────────────────────────────────────
+    @{
+        Name    = 'Network-Connectivity-Monitor'
+        Trigger = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration $forever
+        Args    = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptsDir\Test-NetworkConnectivity.ps1`""
+    },
+    @{
+        Name    = 'RDP-Audit-Logger'
+        Trigger = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever
+        Args    = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptsDir\Export-RdpAuditLog.ps1`""
     }
 )
 

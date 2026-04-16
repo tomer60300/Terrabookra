@@ -105,6 +105,39 @@ $Script:Config = @{
         'artifactory-prod'
     )
 
+    # --- Certificates ---
+    CertsDir         = 'C:\GitLab-Runner\certs'
+
+    # --- Job logging ---
+    JobLogDir        = 'C:\GitLab-Runner\logs\jobs'
+    JobLogMaxDays    = 30
+
+    # --- Network monitor ---
+    NetLogDir        = 'C:\GitLab-Runner\logs\network'
+    NetLogMaxDays    = 30
+    MonitorHosts     = @(
+        @{ Host = 'gitlab.kayhut.com';  Port = 443  },
+        @{ Host = 'harbor.kayhut.com';  Port = 443  },
+        @{ Host = 'kayhut-minio.com';   Port = 9000 },
+        @{ Host = 'artifactory-prod';   Port = 443  },
+        @{ Host = 'be1.kayhut.com';     Port = 443  }
+    )
+
+    # --- RDP audit ---
+    RdpLogDir        = 'C:\GitLab-Runner\logs\rdp'
+    RdpLogMaxDays    = 30
+
+    # --- MinIO object keys (new scripts) ---
+    S3KeysExtra = @{
+        ImportCerts    = 'scripts/Import-Certificates.ps1'
+        EnableRemotePS = 'scripts/Enable-RemotePowerShell.ps1'
+        NetMonitor     = 'scripts/Test-NetworkConnectivity.ps1'
+        JobLog         = 'scripts/Write-JobLog.ps1'
+        RdpAudit       = 'scripts/Export-RdpAuditLog.ps1'
+        OpenCodeExe    = 'tools/opencode/opencode-desktop-windows-x64-setup.exe'
+        OpenCodeConfig = 'tools/opencode/opencode.jsonc'
+    }
+
     # --- Services to disable ---
     DisableServices = @(
         'WSearch', 'Spooler', 'Fax', 'WerSvc', 'DiagTrack', 'SysMain',

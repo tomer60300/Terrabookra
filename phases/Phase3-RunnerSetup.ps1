@@ -120,6 +120,8 @@ log_level = "info"
   executor = "docker-windows"
   tls-verify = false
   environment = ["GIT_SSL_NO_VERIFY=true", "DOCKER_TLS_CERTDIR="]
+  pre_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action start"
+  post_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action end"
 
   [runners.docker]
     image = "harbor.kayhut.com/golden-image/servercore:ltsc2019"
@@ -183,6 +185,21 @@ $dnsLine
         @{ Key = $Script:Config.S3Keys.RegTasks;     File = 'Register-ScheduledTasks.ps1' }
     )) {
         Get-S3Object -Key $s.Key -OutFile (Join-Path $Script:Config.ScriptsDir $s.File) | Out-Null
+    }
+
+    # Deploy new feature scripts
+    foreach ($s in @(
+        @{ Key = $Script:Config.S3KeysExtra.ImportCerts;    File = 'Import-Certificates.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.EnableRemotePS; File = 'Enable-RemotePowerShell.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.NetMonitor;     File = 'Test-NetworkConnectivity.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.JobLog;         File = 'Write-JobLog.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.RdpAudit;       File = 'Export-RdpAuditLog.ps1' }
+    )) {
+        Get-S3Object -Key $s.Key -OutFile (Join-Path $Script:Config.ScriptsDir $s.File) | Out-Null
+    }
+    # Create log subdirectories
+    foreach ($d in @($Script:Config.JobLogDir, $Script:Config.NetLogDir, $Script:Config.RdpLogDir)) {
+        if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
     }
 
     # ── 3.10 Register scheduled tasks ────────────────────────
