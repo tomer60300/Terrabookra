@@ -2,7 +2,7 @@
 
 ## Overview
 
-Terrabookra provisions GitLab Runner VMs in a fully air-gapped Windows Server 2019 environment. The provisioning flow is:
+Terrabookra provisions GitLab Runner VMs in a fully air-gapped Windows Server 2019 environment. The project follows a **manager/worker modular design** — the orchestrator loads libraries and dispatches to focused phase scripts.
 
 ```
 Be1 (VMware Aria) provisions VM
@@ -11,32 +11,57 @@ Be1 (VMware Aria) provisions VM
   Domain join + DNS config (handled by Be1/Bukra)
         │
         ▼
-  Install-GitLabRunner.ps1 runs as Administrator
+  Install-GitLabRunner.ps1 (orchestrator)
         │
-        ├── Phase 1: System Prep ──────────► REBOOT
-        │                                       │
-        ├── Phase 2: Docker Install ───────► REBOOT
-        │                                       │
-        └── Phase 3: Runner + Validation ──► DONE (runner polling for jobs)
+        ├── dot-source lib/Config.ps1
+        ├── dot-source lib/Common.ps1
+        ├── dot-source phases/*.ps1
+        ├── dot-source validation/*.ps1
+        │
+        ├── Phase 1: phases/Phase1-SystemPrep.ps1 ────► REBOOT
+        │                                                  │
+        ├── Phase 2: phases/Phase2-DockerInstall.ps1 ──► REBOOT
+        │                                                  │
+        └── Phase 3: phases/Phase3-RunnerSetup.ps1 ───► DONE
+                         └── validation/Invoke-FinalValidation.ps1
 ```
+
+---
+
+## Module Dependency Map
+
+```
+Install-GitLabRunner.ps1 (orchestrator)
+    │
+    ├── lib/Config.ps1          ← loaded first (no dependencies)
+    ├── lib/Common.ps1          ← depends on Config.ps1 ($Script:Config)
+    │
+    ├── phases/Phase1-SystemPrep.ps1      ← uses Common.ps1 functions
+    ├── phases/Phase2-DockerInstall.ps1   ← uses Common.ps1 functions
+    ├── phases/Phase3-RunnerSetup.ps1     ← uses Common.ps1 + calls Invoke-FinalValidation
+    │
+    └── validation/Invoke-FinalValidation.ps1  ← uses Common.ps1 + Config.ps1
+```
+
+All files are dot-sourced into the same scope by the orchestrator. They share `$Script:Config` and all functions from `Common.ps1`.
 
 ---
 
 ## Phase Detection
 
-The script is re-run from the top after each reboot. Marker files determine where to resume:
+The orchestrator is re-run from the top after each reboot. Marker files determine where to resume:
 
 | Marker | Location | Meaning |
 |--------|----------|---------|
-| `.phase1_complete` | `C:\GitLab-Runner\` | Phase 1 done, start Phase 2 |
-| `.phase2_complete` | `C:\GitLab-Runner\` | Phase 2 done, start Phase 3 |
-| No markers | — | Fresh start, run Phase 1 |
+| `.phase1_complete` | `C:\GitLab-Runner\` | Phase 1 done → start Phase 2 |
+| `.phase2_complete` | `C:\GitLab-Runner\` | Phase 2 done → start Phase 3 |
+| No markers | — | Fresh start → run Phase 1 |
 
 Markers older than 60 minutes are treated as stale and the phase is re-run.
 
 ---
 
-## Phase 1: System Preparation
+## Phase 1: System Preparation (`phases/Phase1-SystemPrep.ps1`)
 
 | Step | Action |
 |------|--------|
@@ -52,7 +77,7 @@ Markers older than 60 minutes are treated as stale and the phase is re-run.
 
 ---
 
-## Phase 2: Docker Installation
+## Phase 2: Docker Installation (`phases/Phase2-DockerInstall.ps1`)
 
 | Step | Action |
 |------|--------|
@@ -64,7 +89,7 @@ Docker 25.0.15 is installed from raw binaries — not via Mirantis Container Run
 
 ---
 
-## Phase 3: Runner Setup
+## Phase 3: Runner Setup (`phases/Phase3-RunnerSetup.ps1`)
 
 | Step | Action |
 |------|--------|
@@ -79,7 +104,23 @@ Docker 25.0.15 is installed from raw binaries — not via Mirantis Container Run
 | 3.9 | Deploy 5 maintenance scripts from MinIO |
 | 3.10 | Register 10 scheduled tasks |
 | 3.11 | Deploy tools (WinRAR, NSSM, SysInternals) |
-| 3.12 | Run 17-check final validation |
+| 3.12 | Final validation (17 checks via `validation/Invoke-FinalValidation.ps1`) |
+
+---
+
+## Troubleshooting by Module
+
+When something fails, the install log (`C:\GitLab-Runner\logs\install.log`) shows the step number. Here's where to look:
+
+| Log shows | File to check |
+|-----------|--------------|
+| `[ERROR]` during 1.x steps | `phases/Phase1-SystemPrep.ps1` |
+| `[ERROR]` during 2.x steps | `phases/Phase2-DockerInstall.ps1` |
+| `[ERROR]` during 3.x steps | `phases/Phase3-RunnerSetup.ps1` |
+| `[FAIL]` in validation | `validation/Invoke-FinalValidation.ps1` |
+| S3 download failures | `lib/Common.ps1` → `Get-S3Object` |
+| Config values wrong | `lib/Config.ps1` |
+| Phase stuck / re-running | Check marker files in `C:\GitLab-Runner\` |
 
 ---
 
@@ -118,22 +159,24 @@ Docker 25.0.15 is installed from raw binaries — not via Mirantis Container Run
 
 ---
 
-## Validation Checks (Phase 3.12)
+## Validation Checks (`validation/Invoke-FinalValidation.ps1`)
 
-1. OS Build = 17763
-2. Containers feature installed
-3. Hyper-V feature installed
-4. Docker service running
-5. Docker version = 25.0.x
-6. Docker isolation = process
-7. Runner binary valid (PE header)
-8. Runner service running
-9. Runner verify (is alive)
-10. Git available
-11. GIT_SSL_NO_VERIFY set
-12. Defender exclusions applied
-13. Helper image present
-14. Scheduled tasks >= 8
-15. Power plan = High Performance
-16. Long paths enabled
-17. Disk free >= 50 GB
+| # | Check |
+|---|-------|
+| 1 | OS Build = 17763 |
+| 2 | Containers feature installed |
+| 3 | Hyper-V feature installed |
+| 4 | Docker service running |
+| 5 | Docker version = 25.0.x |
+| 6 | Docker isolation = process |
+| 7 | Runner binary valid (PE header) |
+| 8 | Runner service running |
+| 9 | Runner verify (is alive) |
+| 10 | Git available |
+| 11 | GIT_SSL_NO_VERIFY set |
+| 12 | Defender exclusions applied |
+| 13 | Helper image present |
+| 14 | Scheduled tasks >= 8 |
+| 15 | Power plan = High Performance |
+| 16 | Long paths enabled |
+| 17 | Disk free >= 50 GB |

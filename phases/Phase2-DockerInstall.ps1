@@ -1,0 +1,96 @@
+<#
+.SYNOPSIS
+    Phase 2 — Docker daemon.json + binary install + service registration.
+
+.DESCRIPTION
+    Called after Phase 1 marker is detected.
+    Installs Docker from raw binaries (not Mirantis):
+
+    2.1  Write daemon.json (insecure registries, process isolation, data-root)
+    2.2  Download docker.exe + dockerd.exe from MinIO
+    2.3  Register dockerd as Windows service
+
+    Reboots via Be1 if Docker service isn't running yet, otherwise continues to Phase 3.
+
+.NOTES
+    File: phases/Phase2-DockerInstall.ps1
+    Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
+#>
+
+function Invoke-Phase2 {
+    Write-Log '========== PHASE 2: Docker Installation =========='
+
+    # ── 2.1 Write daemon.json ────────────────────────────────
+    Write-Log '2.1 Write daemon.json'
+    $dnsServers = Get-DnsServer
+    $daemonConfig = [ordered]@{
+        'insecure-registries'      = $Script:Config.InsecureRegistries
+        'storage-driver'           = 'windowsfilter'
+        'log-driver'               = 'json-file'
+        'log-opts'                 = [ordered]@{ 'max-size' = '50m'; 'max-file' = '5' }
+        'exec-opts'                = @('isolation=process')
+        'max-concurrent-downloads' = 5
+        'max-concurrent-uploads'   = 3
+        'max-download-attempts'    = 5
+        'debug'                    = $false
+        'data-root'                = $Script:Config.DockerDataRoot
+        'group'                    = 'docker-users'
+    }
+    if ($dnsServers.Count -gt 0) { $daemonConfig['dns'] = @($dnsServers) }
+
+    $daemonConfig | ConvertTo-Json -Depth 4 | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
+    Write-Log "daemon.json written (data-root: $($Script:Config.DockerDataRoot))"
+
+    if (-not (Test-Path $Script:Config.DockerDataRoot)) {
+        New-Item -Path $Script:Config.DockerDataRoot -ItemType Directory -Force | Out-Null
+    }
+
+    # ── 2.2 Download Docker binaries ─────────────────────────
+    Write-Log '2.2 Download Docker binaries'
+    $dockerExe  = Join-Path $Script:Config.DockerDir 'docker.exe'
+    $dockerdExe = Join-Path $Script:Config.DockerDir 'dockerd.exe'
+
+    if (-not (Install-S3Binary -S3Key $Script:Config.S3Keys.DockerExe  -DestPath $dockerExe  -Label 'docker.exe'))  {
+        Write-LogError 'FATAL: docker.exe download failed'; exit 1
+    }
+    if (-not (Install-S3Binary -S3Key $Script:Config.S3Keys.DockerdExe -DestPath $dockerdExe -Label 'dockerd.exe')) {
+        Write-LogError 'FATAL: dockerd.exe download failed'; exit 1
+    }
+
+    # ── 2.3 Register dockerd as Windows service ──────────────
+    Write-Log '2.3 Register Docker service'
+    $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
+
+    if ($dockerSvc -and $dockerSvc.Status -eq 'Running') {
+        Write-Log 'Docker service already running'
+    } else {
+        if ($dockerSvc) {
+            Write-Log 'Removing stale Docker service...'
+            Stop-Service docker -Force -ErrorAction SilentlyContinue
+            & $dockerdExe --unregister-service 2>&1 | ForEach-Object { Write-Log "  unregister: $_" }
+            Start-Sleep -Seconds 3
+        }
+
+        & $dockerdExe --register-service 2>&1 | ForEach-Object { Write-Log "  register: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogError 'FATAL: dockerd --register-service failed'
+            exit 1
+        }
+        Write-Log 'dockerd registered as Windows service'
+
+        Start-Service docker -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 10
+    }
+
+    # ── Mark + dispatch ──────────────────────────────────────
+    Set-PhaseMarker $Script:Config.Phase2Marker
+    Write-Log '========== PHASE 2 COMPLETE =========='
+
+    $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
+    if (-not $dockerSvc -or $dockerSvc.Status -ne 'Running') {
+        Invoke-Be1Reboot -Reason 'Phase 2 complete — Docker installed, reboot required'
+    } else {
+        Write-Log 'Docker running, continuing to Phase 3...'
+        Invoke-Phase3
+    }
+}

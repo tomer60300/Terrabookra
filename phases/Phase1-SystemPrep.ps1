@@ -1,0 +1,129 @@
+<#
+.SYNOPSIS
+    Phase 1 — System preparation, services, environment, Windows features.
+
+.DESCRIPTION
+    Called by Install-GitLabRunner.ps1 when no phase markers exist.
+    Prepares the VM for Docker and Runner installation:
+
+    1.1  Register Event Log source
+    1.2  Disable unnecessary Windows services (17 services)
+    1.3  Set High Performance power plan
+    1.4  Configure pagefile on data drive
+    1.5  Network tuning + long paths
+    1.6  Environment variables + PATH
+    1.7  Create directory structure
+    1.8  Increase Event Log sizes
+    1.9  Install Windows Features (Containers + Hyper-V)
+
+    Reboots via Be1 if features required it, otherwise continues to Phase 2.
+
+.NOTES
+    File: phases/Phase1-SystemPrep.ps1
+    Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
+#>
+
+function Invoke-Phase1 {
+    Write-Log '========== PHASE 1: System Preparation =========='
+
+    # ── 1.1 Event Log source ─────────────────────────────────
+    Write-Log '1.1 Register Event Log source'
+    New-EventLog -LogName Application -Source 'GitLabRunner' -ErrorAction SilentlyContinue
+
+    # ── 1.2 Disable unnecessary services ─────────────────────
+    Write-Log '1.2 Disable unnecessary Windows services'
+    foreach ($svc in $Script:Config.DisableServices) {
+        $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
+        if ($service) {
+            Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+            Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Log "Processed $($Script:Config.DisableServices.Count) services"
+
+    # ── 1.3 Power plan ───────────────────────────────────────
+    Write-Log '1.3 Set High Performance power plan'
+    powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+
+    # ── 1.4 Page file ────────────────────────────────────────
+    Write-Log '1.4 Configure page file'
+    try {
+        $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+        $pageFileMB = [math]::Min($ramGB * 1024, $Script:Config.PagefileMaxMB)
+        $cs = Get-CimInstance -ClassName Win32_ComputerSystem
+        $cs | Set-CimInstance -Property @{ AutomaticManagedPagefile = $false }
+        $pfDrive = $Script:DataDrive.TrimEnd(':')
+        $regPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
+        Set-ItemProperty -Path $regPath -Name 'PagingFiles' -Value "${pfDrive}:\pagefile.sys $pageFileMB $pageFileMB"
+        Write-Log "Page file: ${pageFileMB}MB on ${pfDrive}: (RAM: ${ramGB}GB)"
+    }
+    catch { Write-LogWarn "Page file config failed: $_" }
+
+    # ── 1.5 Network tuning + long paths ──────────────────────
+    Write-Log '1.5 Network tuning + long paths'
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Type DWord
+    netsh int tcp set global autotuninglevel=normal 2>$null
+    netsh int ipv4 set dynamicport tcp start=10000 num=55535 2>$null
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters' -Name 'TcpTimedWaitDelay' -Value 30 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -Name 'MaxCacheEntryTtlLimit' -Value 86400 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\WindowMetrics' -Name 'MinAnimate' -Value '0' -ErrorAction SilentlyContinue
+
+    # ── 1.6 Environment variables + PATH ─────────────────────
+    Write-Log '1.6 Set environment variables'
+    [System.Environment]::SetEnvironmentVariable('GIT_SSL_NO_VERIFY', 'true', 'Machine')
+    [System.Environment]::SetEnvironmentVariable('DOTNET_CLI_TELEMETRY_OPTOUT', '1', 'Machine')
+    [System.Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Machine')
+    $currentPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+    foreach ($p in @('C:\Program Files\Docker', 'C:\GitLab-Runner\git\cmd', 'C:\Tools', 'C:\GitLab-Runner')) {
+        if ($currentPath -notlike "*$p*") { $currentPath = "$currentPath;$p" }
+    }
+    [System.Environment]::SetEnvironmentVariable('PATH', $currentPath, 'Machine')
+    $env:PATH = $currentPath
+
+    # ── 1.7 Directory structure ──────────────────────────────
+    Write-Log '1.7 Create directory structure'
+    foreach ($d in @(
+        $Script:Config.RunnerDir, $Script:Config.BuildsDir, $Script:Config.CacheDir,
+        $Script:Config.LogsDir, $Script:Config.ScriptsDir, $Script:Config.GitDir,
+        $Script:Config.ToolsDir, $Script:Config.SysInternalsDir,
+        $Script:Config.DockerConfigDir, $Script:Config.DockerDir
+    )) {
+        if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
+    }
+
+    # ── 1.8 Event Log sizes ─────────────────────────────────
+    Write-Log '1.8 Event Log sizes'
+    wevtutil sl Application /ms:104857600 2>$null
+    wevtutil sl System /ms:104857600 2>$null
+    wevtutil sl Security /ms:52428800 2>$null
+
+    # ── 1.9 Windows Features ─────────────────────────────────
+    Write-Log '1.9 Install Windows Features (Containers, Hyper-V)'
+    $needReboot = $false
+
+    $containersFeature = Get-WindowsFeature -Name Containers
+    if (-not $containersFeature.Installed) {
+        Write-Log 'Installing Containers feature...'
+        $result = Install-WindowsFeature -Name Containers
+        if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
+    } else { Write-Log 'Containers: already installed' }
+
+    $hypervFeature = Get-WindowsFeature -Name Hyper-V
+    if (-not $hypervFeature.Installed) {
+        Write-Log 'Installing Hyper-V feature...'
+        $result = Install-WindowsFeature -Name Hyper-V -IncludeManagementTools
+        if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
+    } else { Write-Log 'Hyper-V: already installed' }
+
+    # ── Mark + dispatch ──────────────────────────────────────
+    Set-PhaseMarker $Script:Config.Phase1Marker
+    Write-Log '========== PHASE 1 COMPLETE =========='
+
+    if ($needReboot) {
+        Invoke-Be1Reboot -Reason 'Phase 1 complete — Windows features require reboot'
+    } else {
+        Write-Log 'No reboot needed, continuing to Phase 2...'
+        Invoke-Phase2
+    }
+}
