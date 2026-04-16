@@ -1,0 +1,24 @@
+# Binaries (stored in MinIO, not Git — too large for GitHub)
+binaries/docker/
+binaries/git/
+binaries/*.exe
+tools/*.exe
+tools/*.zip
+tools/sysinternals/
+
+# Credentials
+*.env
+secrets.json
+
+# Logs
+*.log
+*.log.old
+
+# Temp files
+*.tmp
+~$*
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
