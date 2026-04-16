@@ -6,6 +6,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.2.0] — 2026-04-16
+
+### Added — 4 new features
+
+1. **Runner log collector** (`scripts/Export-RunnerLogs.ps1`)
+   - One-command bundler: install log, daily logs (jobs/network/rdp), maintenance logs,
+     Docker diagnostics, Runner diagnostics, Event Log export, system info, golden version
+   - Creates timestamped zip: `runner-logs-HOSTNAME-YYYYMMDD-HHmmss.zip`
+   - Runnable locally or via PSRemoting from admin PC
+
+2. **Golden image version stamp** (`scripts/Write-GoldenVersion.ps1`)
+   - Writes `C:\GitLab-Runner\.golden-version` (JSON) at end of Phase 3 (step 3.13)
+   - Contains: image version, build date, host, OS build, Runner/Docker/Git versions,
+     component status (certs, WinRM, scheduled tasks count)
+   - Query across fleet: `Invoke-Command -ComputerName runner01,runner02 -ScriptBlock { Get-Content C:\GitLab-Runner\.golden-version | ConvertFrom-Json }`
+
+3. **Fleet health dashboard** (`fleet/Get-FleetHealth.ps1`)
+   - Runs from admin PC, queries all runners via WinRM
+   - Collects: hostname, status, uptime, disk, Docker/Runner status, containers, image version
+   - Color-coded HEALTHY/DEGRADED/UNREACHABLE output
+   - Optional CSV export with `-ExportCsv`
+
+4. **Fleet command runner** (`fleet/Invoke-FleetCommand.ps1`)
+   - Execute any PowerShell command across all runners in parallel
+   - Supports `-Command` (inline) or `-ScriptFile` (file)
+   - Grouped output by hostname, unreachable host reporting
+   - Throttle limit for large fleets
+
+### Changed
+- `lib/Config.ps1` — added `S3KeysExtra.LogCollector`, `S3KeysExtra.GoldenVersion`, `GoldenImageVersion`
+- `phases/Phase3-RunnerSetup.ps1` — deploys 2 new scripts in step 3.9, added step 3.13 (version stamp)
+- S3 objects: 23 → 25 (+2 new scripts)
+- Phase 3 steps: 3.1–3.12 → 3.1–3.13
+
+---
+
 ## [2.1.1] — 2026-04-16
 
 ### Fixed

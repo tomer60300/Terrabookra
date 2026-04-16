@@ -193,7 +193,9 @@ $dnsLine
         @{ Key = $Script:Config.S3KeysExtra.EnableRemotePS; File = 'Enable-RemotePowerShell.ps1' },
         @{ Key = $Script:Config.S3KeysExtra.NetMonitor;     File = 'Test-NetworkConnectivity.ps1' },
         @{ Key = $Script:Config.S3KeysExtra.JobLog;         File = 'Write-JobLog.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.RdpAudit;       File = 'Export-RdpAuditLog.ps1' }
+        @{ Key = $Script:Config.S3KeysExtra.RdpAudit;       File = 'Export-RdpAuditLog.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.LogCollector;   File = 'Export-RunnerLogs.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.GoldenVersion;  File = 'Write-GoldenVersion.ps1' }
     )) {
         Get-S3Object -Key $s.Key -OutFile (Join-Path $Script:Config.ScriptsDir $s.File) | Out-Null
     }
@@ -240,6 +242,16 @@ $dnsLine
     # ── 3.12 Final validation ────────────────────────────────
     Write-Log '========== FINAL VALIDATION =========='
     Invoke-FinalValidation
+
+    # ── 3.13 Write golden image version stamp ───────────────────
+    Write-Log '3.13 Write golden image version stamp'
+    $versionScript = Join-Path $Script:Config.ScriptsDir 'Write-GoldenVersion.ps1'
+    if (Test-Path $versionScript) {
+        & $versionScript -ImageVersion $Script:Config.GoldenImageVersion 2>&1 |
+            ForEach-Object { Write-Log "  version: $_" }
+    } else {
+        Write-LogWarn 'Write-GoldenVersion.ps1 not found — skipping version stamp'
+    }
 
     Write-Log '========== PHASE 3 COMPLETE — RUNNER IS OPERATIONAL =========='
 }

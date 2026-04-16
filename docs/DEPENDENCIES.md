@@ -35,7 +35,9 @@ gitlab-runner-golden/
 │   ├── Enable-RemotePowerShell.ps1 # WinRM setup for remote PS
 │   ├── Test-NetworkConnectivity.ps1# TCP probe logger (daily CSV)
 │   ├── Write-JobLog.ps1            # CI job start/end wrapper logger
-│   └── Export-RdpAuditLog.ps1      # RDP session event parser
+│   ├── Export-RdpAuditLog.ps1      # RDP session event parser
+│   ├── Export-RunnerLogs.ps1       # Log collector — bundles all logs into zip
+│   └── Write-GoldenVersion.ps1     # Golden image version stamp writer
 │
 └── tools/
     ├── winrar-x64-701.exe          # WinRAR silent installer
@@ -74,11 +76,13 @@ gitlab-runner-golden/
 | `S3KeysExtra.NetMonitor` | `scripts/Test-NetworkConnectivity.ps1` | `C:\GitLab-Runner\scripts\Test-NetworkConnectivity.ps1` |
 | `S3KeysExtra.JobLog` | `scripts/Write-JobLog.ps1` | `C:\GitLab-Runner\scripts\Write-JobLog.ps1` |
 | `S3KeysExtra.RdpAudit` | `scripts/Export-RdpAuditLog.ps1` | `C:\GitLab-Runner\scripts\Export-RdpAuditLog.ps1` |
+| `S3KeysExtra.LogCollector` | `scripts/Export-RunnerLogs.ps1` | `C:\GitLab-Runner\scripts\Export-RunnerLogs.ps1` |
+| `S3KeysExtra.GoldenVersion` | `scripts/Write-GoldenVersion.ps1` | `C:\GitLab-Runner\scripts\Write-GoldenVersion.ps1` |
 | `S3KeysExtra.OpenCodeExe` | `tools/opencode/opencode-desktop-windows-x64-setup.exe` | `C:\Tools\` (installer) |
 | `S3KeysExtra.OpenCodeConfig` | `tools/opencode/opencode.jsonc` | `%USERPROFILE%\.config\opencode.jsonc` |
 | `S3Certs[0]` | `certs/kayhut-ca.crt` | `C:\GitLab-Runner\certs\kayhut-ca.crt` → Cert:\LocalMachine\Root |
 
-**Total S3 objects: 27** (15 original + 7 new scripts + 2 OpenCode + 1 certificate + 2 not-yet-deployed-by-script)
+**Total S3 objects: 25** (15 original + 9 new scripts + 2 OpenCode + 1 certificate - 2 shared with original)
 
 ---
 

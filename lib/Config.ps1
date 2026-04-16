@@ -139,9 +139,14 @@ $Script:Config = @{
         NetMonitor     = 'scripts/Test-NetworkConnectivity.ps1'
         JobLog         = 'scripts/Write-JobLog.ps1'
         RdpAudit       = 'scripts/Export-RdpAuditLog.ps1'
+        LogCollector   = 'scripts/Export-RunnerLogs.ps1'
+        GoldenVersion  = 'scripts/Write-GoldenVersion.ps1'
         OpenCodeExe    = 'tools/opencode/opencode-desktop-windows-x64-setup.exe'
         OpenCodeConfig = 'tools/opencode/opencode.jsonc'
     }
+
+    # --- Golden image version ---
+    GoldenImageVersion = '2.2.0'
 
     # --- Services to disable ---
     DisableServices = @(
