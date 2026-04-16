@@ -127,6 +127,11 @@ $Script:Config = @{
     RdpLogDir        = 'C:\GitLab-Runner\logs\rdp'
     RdpLogMaxDays    = 30
 
+    # --- Certificate S3 keys ---
+    S3Certs = @(
+        'certs/kayhut-ca.crt'
+    )
+
     # --- MinIO object keys (new scripts) ---
     S3KeysExtra = @{
         ImportCerts    = 'scripts/Import-Certificates.ps1'

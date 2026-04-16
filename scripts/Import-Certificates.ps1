@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-    Import self-signed certificates into the Windows Local Machine Trusted Root store.
+    Fetch certificates from MinIO S3 and import into the Windows Trusted Root store.
 
 .DESCRIPTION
-    Scans $CertsDir for .crt, .cer, and .pem certificate files and imports each
-    into Cert:\LocalMachine\Root. Skips certificates that are already trusted.
+    1. Downloads .crt files listed in $Script:Config.S3Certs from MinIO to $CertsDir
+    2. Scans $CertsDir for .crt, .cer, and .pem files
+    3. Imports each into Cert:\LocalMachine\Root (skips already-trusted)
+
     Called during Phase 1 (step 1.10).
 
     This is an ADDITIONAL trust layer — GIT_SSL_NO_VERIFY and insecure-registries
@@ -12,26 +14,50 @@
 
 .NOTES
     File: scripts/Import-Certificates.ps1
+    Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
     Event IDs:
       9020 — Certificate imported successfully
       9021 — Certificate import failed
+      9022 — Certificate download from S3 failed
 
     Default cert location: C:\GitLab-Runner\certs\
-    Expected files: gitlab.kayhut.com.crt (and optionally harbor, minio, etc.)
 #>
 
 param(
-    [string]$CertsDir = 'C:\GitLab-Runner\certs'
+    [string]$CertsDir = $Script:Config.CertsDir
 )
+
+if (-not $CertsDir) { $CertsDir = 'C:\GitLab-Runner\certs' }
 
 $ErrorActionPreference = 'Continue'
 $source = 'GitLabRunner'
 
+# ── Ensure certs directory exists ────────────────────────────
 if (-not (Test-Path $CertsDir)) {
-    Write-Output "Certs directory not found: $CertsDir — skipping import"
-    return
+    New-Item -Path $CertsDir -ItemType Directory -Force | Out-Null
 }
 
+# ── Step 1: Fetch certificates from MinIO S3 ────────────────
+$s3Certs = $Script:Config.S3Certs
+if ($s3Certs -and $s3Certs.Count -gt 0) {
+    Write-Output "Fetching $($s3Certs.Count) certificate(s) from S3..."
+    foreach ($certKey in $s3Certs) {
+        $fileName = Split-Path $certKey -Leaf
+        $destPath = Join-Path $CertsDir $fileName
+        $ok = Get-S3Object -Key $certKey -OutFile $destPath
+        if ($ok) {
+            Write-Output "  [DL] $certKey -> $destPath"
+        } else {
+            Write-Output "  [FAIL] Could not download $certKey from S3"
+            Write-EventLog -LogName Application -Source $source -EventId 9022 -EntryType Warning `
+                -Message "Certificate S3 download failed: $certKey"
+        }
+    }
+} else {
+    Write-Output "No S3 certificate keys configured — scanning local certs only"
+}
+
+# ── Step 2: Import all certs found in CertsDir ──────────────
 $certFiles = Get-ChildItem -Path $CertsDir -File | Where-Object {
     $_.Extension -in '.crt', '.cer', '.pem'
 }

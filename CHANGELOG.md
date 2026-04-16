@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.1.1] — 2026-04-16
+
+### Fixed
+- **Certificate import** — certificates now fetched from MinIO S3 before importing
+  - `Import-Certificates.ps1` downloads `.crt` files listed in `$Config.S3Certs` to `CertsDir` first
+  - Then imports all found `.crt/.cer/.pem` into Trusted Root (same logic as before)
+  - Added Event ID 9022 for S3 download failures
+  - `lib/Config.ps1` — added `S3Certs` array with S3 object keys for certificate files
+
+---
+
 ## [2.1.0] — 2026-04-16
 
 ### Added — 6 new features
