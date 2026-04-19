@@ -34,6 +34,14 @@ $Script:Config = @{
     MinioRegion      = 'us-east-1'
 
     # --- GitLab ---
+    # GITLAB_RUNNER_TOKEN must be set as env var or Machine-level variable
+    # before running. Two formats supported:
+    #   glrt-XXXX  = Runner Authentication Token (GitLab 16.0+)
+    #                Created via GitLab UI: Settings > CI/CD > Runners > New runner
+    #                Goes directly into config.toml, no registration needed.
+    #   PAT / legacy registration token
+    #                Script will call `gitlab-runner register --registration-token`
+    #                and extract the resulting auth token.
     GitLabUrl        = 'https://gitlab.kayhut.com'
 
     # --- Harbor ---

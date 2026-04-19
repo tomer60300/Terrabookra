@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.2.1] — 2026-04-19
+
+### Fixed — 4 audit issues
+
+1. **OpenCode never deployed** — Phase 3 step 3.11 now downloads installer + config from S3
+   - Installer saved to `C:\Tools\opencode-setup.exe` (manual install)
+   - Config deployed to `%USERPROFILE%\.config\opencode.jsonc`
+
+2. **Phase 1 scripts missing on fresh VM** — Steps 1.10 and 1.11 now fetch
+   `Import-Certificates.ps1` and `Enable-RemotePowerShell.ps1` from S3 before
+   calling them. Previously they were silently skipped on first boot because
+   Phase 3 (which deploys scripts) hadn't run yet.
+
+3. **Inline scheduled task fallback incomplete** — Added `Network-Connectivity-Monitor`
+   and `RDP-Audit-Logger` to the inline fallback (was 10 tasks, now 12 — matches
+   `Register-ScheduledTasks.ps1`).
+
+4. **Token handling** — `GITLAB_RUNNER_TOKEN` now supports two formats:
+   - `glrt-XXXX` (Runner Authentication Token, GitLab 16.0+) — written directly
+     to config.toml, registration skipped
+   - Registration token / PAT — runs `gitlab-runner register --registration-token`,
+     extracts the resulting auth token from config.toml
+   - Documented in `lib/Config.ps1` and `docs/DEPENDENCIES.md`
+   - Hardcoded `harbor.kayhut.com/golden-image/servercore:ltsc2019` in config.toml
+     and register command now uses `$Config.HarborUrl` variable
+
+---
+
 ## [2.2.0] — 2026-04-16
 
 ### Added — 4 new features

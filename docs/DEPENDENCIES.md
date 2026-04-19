@@ -86,6 +86,42 @@ gitlab-runner-golden/
 
 ---
 
+## Environment Variables (Required Before Provisioning)
+
+| Variable | Required | How to Set | Description |
+|---|---|---|---|
+| `GITLAB_RUNNER_TOKEN` | **Yes** | Be1/Aria VM property or Machine env var | Runner token — see below |
+
+### GITLAB_RUNNER_TOKEN — Two Formats Supported
+
+**Option 1: Runner Authentication Token (recommended for GitLab 16.0+)**
+
+Starts with `glrt-`. Created in GitLab UI: Settings → CI/CD → Runners → New runner.
+This token is already authenticated — the script writes it directly to config.toml
+and **skips** the `gitlab-runner register` command.
+
+```
+GITLAB_RUNNER_TOKEN=glrt-AbCdEf123456
+```
+
+**Option 2: Registration Token or Personal Access Token (legacy)**
+
+Does NOT start with `glrt-`. The script runs `gitlab-runner register --registration-token`
+to exchange it for an auth token, then extracts the resulting `glrt-` token from the
+generated config.toml.
+
+```
+GITLAB_RUNNER_TOKEN=GR1348941_xxxxxxxxxxxxxxxx
+```
+
+**How to provide via Be1/Aria:**
+
+Set as a VM custom property that Be1 injects as a Machine-level environment variable
+before the post-install script runs. The script checks `$env:GITLAB_RUNNER_TOKEN` first,
+then falls back to `[System.Environment]::GetEnvironmentVariable('GITLAB_RUNNER_TOKEN', 'Machine')`.
+
+---
+
 ## Harbor — Project: `golden-image`
 
 Registry: `harbor.kayhut.com`

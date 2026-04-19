@@ -10,13 +10,14 @@
     3.3   Install MinGit
     3.4   Download GitLab Runner binary
     3.5   Pre-pull Harbor container images
-    3.6   Write config.toml
-    3.7   Register runner with GitLab
+    3.6   Resolve token (glrt- auth token vs registration token / PAT)
+    3.7   Register runner (skipped if glrt- token) + write config.toml
     3.8   Install runner as Windows service
     3.9   Deploy maintenance scripts from MinIO
     3.10  Register scheduled tasks
-    3.11  Deploy tools (WinRAR, NSSM, SysInternals)
+    3.11  Deploy tools (WinRAR, NSSM, SysInternals, OpenCode)
     3.12  Final validation (17 checks)
+    3.13  Write golden image version stamp
 
 .NOTES
     File: phases/Phase3-RunnerSetup.ps1
@@ -90,10 +91,28 @@ function Invoke-Phase3 {
     }
 
     # ── 3.6 Write config.toml ────────────────────────────────
-    Write-Log '3.6 Write config.toml'
+    Write-Log '3.6 Resolve runner token + write config.toml'
+
+    # Token resolution: env var → Machine env → FATAL
+    # Supports two formats:
+    #   glrt-XXXX   = Runner Authentication Token (GitLab 16.0+, already registered)
+    #   glrt- prefix means the runner was created via UI/API and this IS the auth token
+    #   Anything else = treated as Registration Token (legacy) or PAT
     $runnerToken = $env:GITLAB_RUNNER_TOKEN
     if (-not $runnerToken) { $runnerToken = [System.Environment]::GetEnvironmentVariable('GITLAB_RUNNER_TOKEN', 'Machine') }
-    if (-not $runnerToken) { Write-LogError 'FATAL: GITLAB_RUNNER_TOKEN not found'; exit 1 }
+    if (-not $runnerToken) {
+        Write-LogError 'FATAL: GITLAB_RUNNER_TOKEN not found.'
+        Write-LogError '  Set as env var or Machine-level variable before running.'
+        Write-LogError '  Accepted formats: glrt-XXXX (auth token) or PAT/registration token.'
+        exit 1
+    }
+
+    $isAuthToken = $runnerToken -match '^glrt-'
+    if ($isAuthToken) {
+        Write-Log "Token type: Runner Authentication Token (glrt-***)"
+    } else {
+        Write-Log "Token type: Registration Token / PAT (will register first)"
+    }
 
     $hostname   = $env:COMPUTERNAME
     $dnsServers = Get-DnsServer
@@ -103,7 +122,39 @@ function Invoke-Phase3 {
 
     $buildsVol = "$($Script:Config.BuildsDir -replace '\\','\\'):C:\\builds"
     $cacheVol  = "$($Script:Config.CacheDir  -replace '\\','\\'):C:\\cache"
+    $defaultImage = "$($Script:Config.HarborUrl)/golden-image/servercore:ltsc2019"
 
+    # ── 3.7 Register runner (if not already auth token) ──────
+    if ($isAuthToken) {
+        Write-Log '3.7 Skip registration — glrt- token is already authenticated'
+    } else {
+        Write-Log '3.7 Register runner with GitLab (registration token / PAT)'
+        & $Script:Config.RunnerBin register `
+            --non-interactive `
+            --url $Script:Config.GitLabUrl `
+            --registration-token $runnerToken `
+            --executor docker-windows `
+            --docker-image $defaultImage `
+            --tls-ca-file "" `
+            --name "runner-$hostname" 2>&1 | ForEach-Object { Write-Log "  register: $_" }
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log 'Registration successful — extracting auth token from config.toml'
+            # After registration, gitlab-runner writes the real auth token to config.toml
+            # Extract it so our config.toml rewrite uses the correct token
+            $regConfig = Get-Content $Script:Config.ConfigToml -Raw -ErrorAction SilentlyContinue
+            if ($regConfig -match 'token\s*=\s*"(glrt-[^"]+)"') {
+                $runnerToken = $Matches[1]
+                Write-Log "Extracted auth token: glrt-***"
+            } else {
+                Write-LogWarn 'Could not extract auth token from registration output — using original token'
+            }
+        } else {
+            Write-LogWarn 'Runner registration non-zero. Will write config.toml with provided token — runner may still work.'
+        }
+    }
+
+    # Write (or overwrite) config.toml with our full config
     $configContent = @"
 # GitLab Runner Configuration — Auto-generated
 # Host: $hostname | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
@@ -124,7 +175,7 @@ log_level = "info"
   post_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action end"
 
   [runners.docker]
-    image = "harbor.kayhut.com/golden-image/servercore:ltsc2019"
+    image = "$defaultImage"
     helper_image = "$($Script:Config.HelperImage)"
     isolation = "process"
     pull_policy = ["if-not-present"]
@@ -143,23 +194,6 @@ $dnsLine
 "@
     $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
     Write-Log 'config.toml written'
-
-    # ── 3.7 Register runner ──────────────────────────────────
-    Write-Log '3.7 Register runner'
-    & $Script:Config.RunnerBin register `
-        --non-interactive `
-        --url $Script:Config.GitLabUrl `
-        --token $runnerToken `
-        --executor docker-windows `
-        --docker-image "harbor.kayhut.com/golden-image/servercore:ltsc2019" `
-        --tls-ca-file "" `
-        --name "runner-$hostname" 2>&1 | ForEach-Object { Write-Log "  register: $_" }
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-LogWarn 'Runner registration non-zero. Config.toml pre-written — runner may still work.'
-    }
-    # Overwrite config.toml with our version (registration may have mangled it)
-    $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
 
     # ── 3.8 Install runner service (idempotent) ──────────────
     Write-Log '3.8 Install runner service'
@@ -237,6 +271,17 @@ $dnsLine
     )) { Get-S3Object -Key $si.Key -OutFile (Join-Path $Script:Config.SysInternalsDir $si.File) | Out-Null }
 
     Install-S3Archive -S3Key $Script:Config.S3Keys.PsToolsZip -DestDir $Script:Config.SysInternalsDir -TestFile '' -Label 'PSTools' | Out-Null
+
+    # OpenCode — installer + config
+    $openCodeExe = Join-Path $Script:Config.ToolsDir 'opencode-setup.exe'
+    if (Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeExe -OutFile $openCodeExe) {
+        Write-Log 'OpenCode installer downloaded (manual install later)'
+    }
+    $openCodeConfig = Join-Path $env:USERPROFILE '.config\opencode.jsonc'
+    $openCodeConfigDir = Split-Path $openCodeConfig -Parent
+    if (-not (Test-Path $openCodeConfigDir)) { New-Item -Path $openCodeConfigDir -ItemType Directory -Force | Out-Null }
+    Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeConfig -OutFile $openCodeConfig | Out-Null
+
     Write-Log 'Tools deployed'
 
     # ── 3.12 Final validation ────────────────────────────────
@@ -274,7 +319,9 @@ function Register-InlineScheduledTask {
         @{ Name='Disk-Space-Monitor';          Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration $forever);Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\disk-monitor.ps1`"" },
         @{ Name='Docker-Daemon-Watchdog';      Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\docker-watchdog.ps1`"" },
         @{ Name='Runner-Service-Watchdog';     Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -Command `"if ((Get-Service gitlab-runner -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service gitlab-runner; Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9004 -EntryType Warning -Message 'Runner restarted.' }`"" },
-        @{ Name='Log-Rotation';                Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00');                                                      Action="-NoProfile -Command `"Get-ChildItem 'C:\GitLab-Runner\logs\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`"" }
+        @{ Name='Log-Rotation';                Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00');                                                      Action="-NoProfile -Command `"Get-ChildItem 'C:\GitLab-Runner\logs\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`"" },
+        @{ Name='Network-Connectivity-Monitor';Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Test-NetworkConnectivity.ps1`"" },
+        @{ Name='RDP-Audit-Logger';            Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Export-RdpAuditLog.ps1`"" }
     )
     foreach ($t in $tasks) {
         $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $t.Action

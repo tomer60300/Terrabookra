@@ -118,7 +118,12 @@ function Invoke-Phase1 {
 
     # ── 1.10 Import self-signed certificates ─────────────────
     Write-Log '1.10 Import self-signed certificates'
-    $importScript = Join-Path $Script:ScriptRoot 'scripts\Import-Certificates.ps1'
+    # Download script from S3 first (Phase 3 not yet run on fresh VM)
+    $importScript = Join-Path $Script:Config.ScriptsDir 'Import-Certificates.ps1'
+    if (-not (Test-Path $importScript)) {
+        Write-Log '  Fetching Import-Certificates.ps1 from S3...'
+        Get-S3Object -Key $Script:Config.S3KeysExtra.ImportCerts -OutFile $importScript | Out-Null
+    }
     if (Test-Path $importScript) {
         & $importScript -CertsDir $Script:Config.CertsDir 2>&1 | ForEach-Object { Write-Log "  certs: $_" }
     } else {
@@ -127,7 +132,12 @@ function Invoke-Phase1 {
 
     # ── 1.11 Enable WinRM (remote PowerShell) ────────────────
     Write-Log '1.11 Enable WinRM for remote PowerShell'
-    $winrmScript = Join-Path $Script:ScriptRoot 'scripts\Enable-RemotePowerShell.ps1'
+    # Download script from S3 first (Phase 3 not yet run on fresh VM)
+    $winrmScript = Join-Path $Script:Config.ScriptsDir 'Enable-RemotePowerShell.ps1'
+    if (-not (Test-Path $winrmScript)) {
+        Write-Log '  Fetching Enable-RemotePowerShell.ps1 from S3...'
+        Get-S3Object -Key $Script:Config.S3KeysExtra.EnableRemotePS -OutFile $winrmScript | Out-Null
+    }
     if (Test-Path $winrmScript) {
         & $winrmScript 2>&1 | ForEach-Object { Write-Log "  winrm: $_" }
     } else {
