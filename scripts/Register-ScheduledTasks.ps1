@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Register all maintenance scheduled tasks for the GitLab Runner golden image.
 
@@ -97,7 +97,7 @@ $tasks = @(
         Trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00'
         Args    = "-NoProfile -Command `"Get-ChildItem '$LogsDir\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`""
     },
-    # ── New feature tasks ────────────────────────────────────
+    # -- New feature tasks ------------------------------------
     @{
         Name    = 'Network-Connectivity-Monitor'
         Trigger = New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration $forever

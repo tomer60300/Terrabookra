@@ -1,11 +1,11 @@
-<#
+﻿<#
 .SYNOPSIS
-    Kill stale containers — removes CI containers stuck longer than 4 hours.
+    Kill stale containers -- removes CI containers stuck longer than threshold.
 
 .DESCRIPTION
     Runs every 2 hours via scheduled task (Docker-Stale-Container-Kill).
-    Parses `docker ps` output to detect containers running longer than
-    the threshold and force-kills them.
+    Parses `docker ps` RunningFor field to detect containers running longer
+    than the threshold and force-kills them. Handles hours, days, and weeks.
 
 .PARAMETER MaxAgeHours
     Hours before a running container is considered stale. Default: 4
@@ -15,7 +15,7 @@
 
 .NOTES
     Event IDs:
-      9012 — Stale containers killed
+      9012 -- Stale containers killed
 #>
 
 param(
@@ -28,19 +28,25 @@ $ErrorActionPreference = 'Continue'
 $logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
-# ── Find and kill stale containers ───────────────────────────
+# -- Find and kill stale containers -------------------------------
 $killed = 0
 $containers = docker ps --format "{{.ID}} {{.RunningFor}}" 2>$null
 
 foreach ($line in $containers) {
-    if ($line -match '^(\w+)\s+.*?(\d+)\s+hours') {
-        $id    = $Matches[1]
-        $hours = [int]$Matches[2]
+    if ($line -match '^(\w+)\s+(.+)$') {
+        $id     = $Matches[1]
+        $runFor = $Matches[2]
 
-        if ($hours -ge $MaxAgeHours) {
+        # Convert RunningFor text to approximate hours
+        $totalHours = 0
+        if ($runFor -match '(\d+)\s+weeks?')  { $totalHours += [int]$Matches[1] * 168 }
+        if ($runFor -match '(\d+)\s+days?')   { $totalHours += [int]$Matches[1] * 24 }
+        if ($runFor -match '(\d+)\s+hours?')  { $totalHours += [int]$Matches[1] }
+
+        if ($totalHours -ge $MaxAgeHours) {
             docker kill $id 2>&1 | Out-Null
             $killed++
-            "$(Get-Date -Format o) Killed container $id (running ${hours}h)" |
+            "$(Get-Date -Format o) Killed container $id (running ~${totalHours}h, raw: $runFor)" |
                 Out-File $LogFile -Append -Encoding UTF8
         }
     }

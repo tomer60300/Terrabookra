@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Common helpers — TLS bypass, logging, S3 download, PE validation, phase markers, reboot.
+    Common helpers -- TLS bypass, logging, S3 download, PE validation, phase markers, reboot.
 
 .DESCRIPTION
     Dot-sourced by Install-GitLabRunner.ps1 after Config.ps1.
@@ -21,7 +21,7 @@
 #>
 
 # ============================================================
-# TLS BYPASS — Guard against re-add on Be1 re-run
+# TLS BYPASS -- Guard against re-add on Be1 re-run
 # ============================================================
 
 if (-not ([System.Management.Automation.PSTypeName]'TrustAllCerts').Type) {
@@ -65,7 +65,7 @@ function Write-LogError { param([string]$Message) Write-Log -Message $Message -L
 function Write-LogWarn  { param([string]$Message) Write-Log -Message $Message -Level 'WARN'  }
 
 # ============================================================
-# S3 DOWNLOAD (MinIO — AWS Signature V4)
+# S3 DOWNLOAD (MinIO -- AWS Signature V4)
 # ============================================================
 
 function Get-S3Object {
@@ -179,7 +179,7 @@ function Install-S3Binary {
     if (Test-PEBinary $DestPath) { Write-Log "$Label already present"; return $true }
     $ok = Get-S3Object -Key $S3Key -OutFile $DestPath
     if ($ok -and (Test-PEBinary $DestPath)) { Write-Log "$Label downloaded and validated"; return $true }
-    Write-LogError "FATAL: $Label — download or validation failed"
+    Write-LogError "FATAL: $Label -- download or validation failed"
     return $false
 }
 
@@ -197,7 +197,7 @@ function Install-S3Archive {
         Write-Log "$Label extracted to $DestDir"
         return $true
     }
-    Write-LogError "FATAL: $Label — download failed"
+    Write-LogError "FATAL: $Label -- download failed"
     return $false
 }
 

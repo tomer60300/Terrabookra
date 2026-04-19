@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Fleet health dashboard — query all runners via PSRemoting, display status table.
+    Fleet health dashboard -- query all runners via PSRemoting, display status table.
 
 .DESCRIPTION
     Run this from your ADMIN PC (not on the runners).
@@ -47,7 +47,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ── Remote script block ──────────────────────────────────────
+# -- Remote script block --------------------------------------
 $probe = {
     param($RunnerDir)
 
@@ -135,7 +135,7 @@ $probe = {
     [PSCustomObject]$result
 }
 
-# ── Execute across fleet ─────────────────────────────────────
+# -- Execute across fleet -------------------------------------
 Write-Output "`n  Querying $($Runners.Count) runner(s)...`n"
 
 $results = @()
@@ -174,7 +174,7 @@ foreach ($runner in $Runners) {
     }
 }
 
-# ── Display ──────────────────────────────────────────────────
+# -- Display --------------------------------------------------
 $results | Format-Table -AutoSize -Property @(
     'Hostname', 'Status', 'ImageVersion', 'Uptime',
     'DiskFreeC_GB', 'DockerStatus', 'RunnerStatus',
@@ -187,7 +187,7 @@ $degraded    = ($results | Where-Object { $_.Status -like 'DEGRADED*' }).Count
 $unreachable = ($results | Where-Object { $_.Status -eq 'UNREACHABLE' }).Count
 Write-Output "Fleet: $healthy healthy, $degraded degraded, $unreachable unreachable (total: $($Runners.Count))"
 
-# ── Optional CSV export ──────────────────────────────────────
+# -- Optional CSV export --------------------------------------
 if ($ExportCsv) {
     $results | Export-Csv -Path $ExportCsv -NoTypeInformation -Encoding UTF8
     Write-Output "Exported to: $ExportCsv"

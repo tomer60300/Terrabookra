@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Docker daemon watchdog — restarts Docker + Runner if the daemon is unresponsive.
+    Docker daemon watchdog -- restarts Docker + Runner if the daemon is unresponsive.
 
 .DESCRIPTION
     Runs every 5 minutes via scheduled task (Docker-Daemon-Watchdog).
@@ -12,8 +12,8 @@
 
 .NOTES
     Event IDs:
-      9003 — Docker daemon restarted
-      9009 — Docker restart failed
+      9003 -- Docker daemon restarted
+      9009 -- Docker restart failed
 #>
 
 param(
@@ -26,7 +26,7 @@ $source = 'GitLabRunner'
 $logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
-# ── Check Docker ─────────────────────────────────────────────
+# -- Check Docker ---------------------------------------------
 $dockerOk = $false
 try {
     $null = docker info 2>&1
@@ -36,7 +36,7 @@ catch { <# fall through to restart #> }
 
 if ($dockerOk) { return }
 
-# ── Restart Docker ───────────────────────────────────────────
+# -- Restart Docker -------------------------------------------
 Write-EventLog -LogName Application -Source $source -EventId 9003 -EntryType Error `
     -Message 'Docker daemon unresponsive. Restarting Docker and Runner services.'
 
@@ -47,13 +47,13 @@ Start-Sleep -Seconds 15
 $null = docker info 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-EventLog -LogName Application -Source $source -EventId 9009 -EntryType Error `
-        -Message 'Docker restart FAILED — daemon still unresponsive after restart.'
+        -Message 'Docker restart FAILED -- daemon still unresponsive after restart.'
     "$(Get-Date -Format o) Docker restart FAILED" |
         Out-File $LogFile -Append -Encoding UTF8
     return
 }
 
-# ── Restart Runner (lost Docker connection) ──────────────────
+# -- Restart Runner (lost Docker connection) ------------------
 Restart-Service gitlab-runner -Force -ErrorAction SilentlyContinue
 
 "$(Get-Date -Format o) Docker daemon restarted successfully. Runner restarted." |

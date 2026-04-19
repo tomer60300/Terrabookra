@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Final validation — 17-check suite to confirm the runner is fully operational.
+    Final validation -- 17-check suite to confirm the runner is fully operational.
 
 .DESCRIPTION
     Called at the end of Phase 3. Runs checks against OS, Docker, Runner, Git,
@@ -8,8 +8,8 @@
     and to the Application Event Log.
 
     Exit criteria:
-      - All 17 checks PASS → Event 9011 (Info)
-      - Any check FAIL     → Event 9010 (Warning) — runner may still work
+      - All 17 checks PASS -> Event 9011 (Info)
+      - Any check FAIL     -> Event 9010 (Warning) -- runner may still work
 
 .NOTES
     File: validation/Invoke-FinalValidation.ps1
@@ -45,7 +45,7 @@ function Invoke-FinalValidation {
             if (& $Test) { Write-Log "  [PASS] $Name"; $script:pass++ }
             else          { Write-Log "  [FAIL] $Name" -Level 'WARN'; $script:fail++ }
         }
-        catch { Write-Log "  [FAIL] $Name — $_" -Level 'WARN'; $script:fail++ }
+        catch { Write-Log "  [FAIL] $Name -- $_" -Level 'WARN'; $script:fail++ }
     }
 
     Check 'OS Build = 17763'            { [System.Environment]::OSVersion.Version.Build -eq 17763 }
@@ -64,7 +64,12 @@ function Invoke-FinalValidation {
     Check 'Scheduled tasks (>=10)'      { (Get-ScheduledTask | Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } | Measure-Object).Count -ge 10 }
     Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
     Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
-    Check 'Disk free >= 50 GB'          { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }
+    Check 'Disk free C: >= 50 GB'       { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }
+    # Check data drive if separate from C:
+    $dd = if (Test-Path 'E:\') { 'E' } else { $null }
+    if ($dd) {
+    Check "Disk free ${dd}: >= 50 GB"    { [math]::Round((Get-PSDrive $dd).Free / 1GB) -ge 50 }
+    }
 
     Write-Log "Validation: $pass/$total passed, $fail failed"
 

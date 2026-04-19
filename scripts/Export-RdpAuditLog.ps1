@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    RDP audit logger — extracts RDP logon events to a clean log file.
+    RDP audit logger -- extracts RDP logon events to a clean log file.
 
 .DESCRIPTION
     Runs every 5 minutes via scheduled task (RDP-Audit-Logger).
@@ -26,11 +26,11 @@
         auditpol /set /subcategory:"Logon" /success:enable /failure:enable
 
     Event IDs tracked:
-      4624 (Type 10) — RDP logon
-      4634           — Logoff
-      4647           — User-initiated logoff
-      21 (TerminalServices-LocalSessionManager) — RDP session logon
-      23 (TerminalServices-LocalSessionManager) — RDP session logoff
+      4624 (Type 10) -- RDP logon
+      4634           -- Logoff
+      4647           -- User-initiated logoff
+      21 (TerminalServices-LocalSessionManager) -- RDP session logon
+      23 (TerminalServices-LocalSessionManager) -- RDP session logoff
 #>
 
 param(
@@ -43,7 +43,7 @@ $markerFile = Join-Path $LogDir '.last-check'
 
 if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 
-# ── Determine time window (since last check) ─────────────────
+# -- Determine time window (since last check) -----------------
 $since = (Get-Date).AddMinutes(-6)  # default: last 6 min (5 min interval + buffer)
 if (Test-Path $markerFile) {
     try { $since = Get-Date (Get-Content $markerFile -Raw).Trim() }
@@ -53,7 +53,7 @@ if (Test-Path $markerFile) {
 $today   = Get-Date -Format 'yyyy-MM-dd'
 $logFile = Join-Path $LogDir "rdp-$today.log"
 
-# ── TerminalServices events (most reliable for RDP) ──────────
+# -- TerminalServices events (most reliable for RDP) ----------
 $tsEvents = @()
 try {
     $tsEvents = Get-WinEvent -FilterHashtable @{
@@ -83,7 +83,7 @@ foreach ($evt in $tsEvents) {
     $line | Out-File $logFile -Append -Encoding UTF8
 }
 
-# ── Security log RDP logons (backup source) ──────────────────
+# -- Security log RDP logons (backup source) ------------------
 $secEvents = @()
 try {
     $secEvents = Get-WinEvent -FilterHashtable @{
@@ -107,10 +107,10 @@ foreach ($evt in $secEvents) {
     $line | Out-File $logFile -Append -Encoding UTF8
 }
 
-# ── Update marker ────────────────────────────────────────────
+# -- Update marker --------------------------------------------
 Get-Date -Format 'o' | Out-File $markerFile -Force -Encoding UTF8
 
-# ── Rotate old logs ──────────────────────────────────────────
+# -- Rotate old logs ------------------------------------------
 Get-ChildItem $LogDir -Filter 'rdp-*.log' | Where-Object {
     $_.LastWriteTime -lt (Get-Date).AddDays(-$MaxAgeDays)
 } | Remove-Item -Force -ErrorAction SilentlyContinue

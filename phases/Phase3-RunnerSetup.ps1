@@ -1,9 +1,9 @@
-<#
+﻿<#
 .SYNOPSIS
-    Phase 3 — Docker verify, runner install, registration, maintenance, validation.
+    Phase 3 -- Docker verify, runner install, registration, maintenance, validation.
 
 .DESCRIPTION
-    Called after Phase 2 marker is detected. Final phase — no reboot after this.
+    Called after Phase 2 marker is detected. Final phase -- no reboot after this.
 
     3.1   Verify Docker daemon (12 attempts)
     3.2   Add Defender exclusions
@@ -28,7 +28,7 @@
 function Invoke-Phase3 {
     Write-Log '========== PHASE 3: Runner Setup & Configuration =========='
 
-    # ── 3.1 Verify Docker daemon ─────────────────────────────
+    # -- 3.1 Verify Docker daemon -----------------------------
     Write-Log '3.1 Verify Docker daemon'
     $dockerReady = $false
     for ($i = 1; $i -le 12; $i++) {
@@ -53,7 +53,7 @@ function Invoke-Phase3 {
     $dockerIsolation = docker info --format '{{.Isolation}}' 2>$null
     Write-Log "Docker: version=$dockerVersion isolation=$dockerIsolation"
 
-    # ── 3.2 Defender exclusions ──────────────────────────────
+    # -- 3.2 Defender exclusions ------------------------------
     Write-Log '3.2 Defender exclusions'
     foreach ($p in @($Script:Config.RunnerDir, $Script:Config.DockerConfigDir,
                      $Script:Config.DockerDir, $Script:Config.BuildsDir,
@@ -66,20 +66,20 @@ function Invoke-Phase3 {
         catch { Write-LogWarn "Defender process exclusion failed: $p" }
     }
 
-    # ── 3.3 MinGit ───────────────────────────────────────────
+    # -- 3.3 MinGit -------------------------------------------
     Write-Log '3.3 MinGit'
     Install-S3Archive -S3Key $Script:Config.S3Keys.MinGitZip `
         -DestDir $Script:Config.GitDir `
         -TestFile (Join-Path $Script:Config.GitDir 'cmd\git.exe') `
         -Label 'MinGit' | Out-Null
 
-    # ── 3.4 GitLab Runner binary ─────────────────────────────
+    # -- 3.4 GitLab Runner binary -----------------------------
     Write-Log '3.4 GitLab Runner binary'
     if (-not (Install-S3Binary -S3Key $Script:Config.S3Keys.RunnerBin -DestPath $Script:Config.RunnerBin -Label 'GitLab Runner')) {
         Write-LogError 'FATAL: Runner binary download failed'; exit 1
     }
 
-    # ── 3.5 Pre-pull Harbor images ───────────────────────────
+    # -- 3.5 Pre-pull Harbor images ---------------------------
     Write-Log '3.5 Pre-pull container images'
     if ($Script:Config.HarborUser -and $Script:Config.HarborPass) {
         Write-Log 'Logging into Harbor...'
@@ -89,13 +89,13 @@ function Invoke-Phase3 {
     foreach ($image in $Script:Config.PrePullImages) {
         Write-Log "Pulling: $image"
         docker pull $image 2>&1 | ForEach-Object { Write-Log "  $_" }
-        if ($LASTEXITCODE -ne 0) { Write-LogWarn "Failed to pull $image — will pull on first job" }
+        if ($LASTEXITCODE -ne 0) { Write-LogWarn "Failed to pull $image -- will pull on first job" }
     }
 
-    # ── 3.6 Write config.toml ────────────────────────────────
+    # -- 3.6 Write config.toml --------------------------------
     Write-Log '3.6 Resolve runner token + write config.toml'
 
-    # Token resolution: env var → Machine env → FATAL
+    # Token resolution: env var -> Machine env -> FATAL
     # Supports two formats:
     #   glrt-XXXX   = Runner Authentication Token (GitLab 16.0+, already registered)
     #   glrt- prefix means the runner was created via UI/API and this IS the auth token
@@ -127,9 +127,9 @@ function Invoke-Phase3 {
     $defaultImage = "$($Script:Config.HarborUrl)/$($Script:Config.HarborProject)/servercore:ltsc2019"
     $scriptsEsc   = $Script:Config.ScriptsDir -replace '\\', '\\'
 
-    # ── 3.7 Register runner (if not already auth token) ──────
+    # -- 3.7 Register runner (if not already auth token) ------
     if ($isAuthToken) {
-        Write-Log '3.7 Skip registration — glrt- token is already authenticated'
+        Write-Log '3.7 Skip registration -- glrt- token is already authenticated'
     } else {
         Write-Log '3.7 Register runner with GitLab (registration token / PAT)'
         & $Script:Config.RunnerBin register `
@@ -142,7 +142,7 @@ function Invoke-Phase3 {
             --name "runner-$hostname" 2>&1 | ForEach-Object { Write-Log "  register: $_" }
 
         if ($LASTEXITCODE -eq 0) {
-            Write-Log 'Registration successful — extracting auth token from config.toml'
+            Write-Log 'Registration successful -- extracting auth token from config.toml'
             # After registration, gitlab-runner writes the real auth token to config.toml
             # Extract it so our config.toml rewrite uses the correct token
             $regConfig = Get-Content $Script:Config.ConfigToml -Raw -ErrorAction SilentlyContinue
@@ -150,16 +150,19 @@ function Invoke-Phase3 {
                 $runnerToken = $Matches[1]
                 Write-Log "Extracted auth token: glrt-***"
             } else {
-                Write-LogWarn 'Could not extract auth token from registration output — using original token'
+                Write-LogWarn 'Could not extract auth token from registration output -- using original token'
             }
         } else {
-            Write-LogWarn 'Runner registration non-zero. Will write config.toml with provided token — runner may still work.'
+            Write-LogError 'Runner registration FAILED (non-zero exit).'
+            Write-LogError 'The provided token is NOT a valid runner auth token -- runner will NOT connect.'
+            Write-LogError 'Re-run with a valid glrt- token or fix GitLab connectivity and re-register.'
+            $Script:RunnerRegistrationFailed = $true
         }
     }
 
     # Write (or overwrite) config.toml with our full config
     $configContent = @"
-# GitLab Runner Configuration — Auto-generated
+# GitLab Runner Configuration -- Auto-generated
 # Host: $hostname | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
 concurrent = $($Script:Config.ConcurrentJobs)
@@ -198,22 +201,27 @@ $dnsLine
     $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
     Write-Log 'config.toml written'
 
-    # ── 3.8 Install runner service (idempotent) ──────────────
+    # -- 3.8 Install runner service (idempotent) --------------
     Write-Log '3.8 Install runner service'
     & $Script:Config.RunnerBin stop 2>$null
     & $Script:Config.RunnerBin uninstall 2>$null
     Start-Sleep -Seconds 2
-    & $Script:Config.RunnerBin install 2>&1 | ForEach-Object { Write-Log "  install: $_" }
-    & $Script:Config.RunnerBin start  2>&1 | ForEach-Object { Write-Log "  start: $_" }
+    & $Script:Config.RunnerBin install `
+        --working-directory $Script:Config.RunnerDir `
+        --config $Script:Config.ConfigToml 2>&1 |
+        ForEach-Object { Write-Log "  install: $_" }
+    & $Script:Config.RunnerBin start 2>&1 | ForEach-Object { Write-Log "  start: $_" }
 
     if (Wait-ServiceRunning -Name 'gitlab-runner' -TimeoutSeconds 30 -PollSeconds 3) {
         Write-Log 'GitLab Runner service is RUNNING'
     } else {
         Write-LogError 'GitLab Runner service failed to start'
+        $Script:RunnerRegistrationFailed = $true
     }
 
-    # ── 3.9 Deploy maintenance scripts ───────────────────────
+    # -- 3.9 Deploy maintenance scripts -----------------------
     Write-Log '3.9 Deploy maintenance scripts'
+    $s3Failures = 0
     foreach ($s in @(
         @{ Key = $Script:Config.S3Keys.HealthCheck; File = 'health-check.ps1' },
         @{ Key = $Script:Config.S3Keys.DiskMonitor;  File = 'disk-monitor.ps1' },
@@ -221,7 +229,14 @@ $dnsLine
         @{ Key = $Script:Config.S3Keys.KillStale;    File = 'kill-stale-containers.ps1' },
         @{ Key = $Script:Config.S3Keys.RegTasks;     File = 'Register-ScheduledTasks.ps1' }
     )) {
-        Get-S3Object -Key $s.Key -OutFile (Join-Path $Script:Config.ScriptsDir $s.File) | Out-Null
+        $outPath = Join-Path $Script:Config.ScriptsDir $s.File
+        try {
+            Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
+            if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }
+        } catch {
+            Write-LogWarn "Failed to download $($s.File): $_"
+            $s3Failures++
+        }
     }
 
     # Deploy new feature scripts
@@ -234,21 +249,31 @@ $dnsLine
         @{ Key = $Script:Config.S3KeysExtra.LogCollector;   File = 'Export-RunnerLogs.ps1' },
         @{ Key = $Script:Config.S3KeysExtra.GoldenVersion;  File = 'Write-GoldenVersion.ps1' }
     )) {
-        Get-S3Object -Key $s.Key -OutFile (Join-Path $Script:Config.ScriptsDir $s.File) | Out-Null
+        $outPath = Join-Path $Script:Config.ScriptsDir $s.File
+        try {
+            Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
+            if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }
+        } catch {
+            Write-LogWarn "Failed to download $($s.File): $_"
+            $s3Failures++
+        }
+    }
+    if ($s3Failures -gt 0) {
+        Write-LogWarn "S3 script deployment: $s3Failures file(s) failed -- some scheduled tasks may not work"
     }
     # Create log subdirectories
     foreach ($d in @($Script:Config.JobLogDir, $Script:Config.NetLogDir, $Script:Config.RdpLogDir)) {
         if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
     }
 
-    # ── 3.10 Deploy monitor-hosts.json ───────────────────────
+    # -- 3.10 Deploy monitor-hosts.json -----------------------
     Write-Log '3.10 Deploy monitor-hosts.json from Config.MonitorHosts'
     $monitorJson = ConvertTo-Json -InputObject @($Script:Config.MonitorHosts) -Depth 2
     $monitorJsonPath = Join-Path $Script:Config.ScriptsDir 'monitor-hosts.json'
     $monitorJson | Out-File -FilePath $monitorJsonPath -Encoding UTF8 -Force
     Write-Log "  Written: $monitorJsonPath"
 
-    # ── 3.11 Register scheduled tasks ────────────────────────
+    # -- 3.11 Register scheduled tasks ------------------------
     Write-Log '3.11 Register scheduled tasks'
     $regScript = Join-Path $Script:Config.ScriptsDir 'Register-ScheduledTasks.ps1'
     if (Test-Path $regScript) {
@@ -258,11 +283,11 @@ $dnsLine
             -BuildsDir $Script:Config.BuildsDir 2>&1 |
             ForEach-Object { Write-Log "  tasks: $_" }
     } else {
-        Write-LogWarn 'Register-ScheduledTasks.ps1 not found — inline fallback'
+        Write-LogWarn 'Register-ScheduledTasks.ps1 not found -- inline fallback'
         Register-InlineScheduledTask
     }
 
-    # ── 3.12 Deploy tools ────────────────────────────────────
+    # -- 3.12 Deploy tools ------------------------------------
     Write-Log '3.12 Deploy tools'
     $winrarExe = Join-Path $Script:Config.ToolsDir 'winrar-x64-701.exe'
     if (Get-S3Object -Key $Script:Config.S3Keys.WinRarExe -OutFile $winrarExe) {
@@ -285,7 +310,7 @@ $dnsLine
 
     Install-S3Archive -S3Key $Script:Config.S3Keys.PsToolsZip -DestDir $Script:Config.SysInternalsDir -TestFile '' -Label 'PSTools' | Out-Null
 
-    # OpenCode — installer + config
+    # OpenCode -- installer + config
     $openCodeExe = Join-Path $Script:Config.ToolsDir 'opencode-setup.exe'
     if (Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeExe -OutFile $openCodeExe) {
         Write-Log 'OpenCode installer downloaded (manual install later)'
@@ -297,11 +322,11 @@ $dnsLine
 
     Write-Log 'Tools deployed'
 
-    # ── 3.13 Final validation ────────────────────────────────
+    # -- 3.13 Final validation --------------------------------
     Write-Log '========== FINAL VALIDATION =========='
     Invoke-FinalValidation
 
-    # ── 3.14 Write golden image version stamp ───────────────────
+    # -- 3.14 Write golden image version stamp -------------------
     Write-Log '3.14 Write golden image version stamp'
     $versionScript = Join-Path $Script:Config.ScriptsDir 'Write-GoldenVersion.ps1'
     if (Test-Path $versionScript) {
@@ -313,10 +338,14 @@ $dnsLine
             -CertsDir $Script:Config.CertsDir 2>&1 |
             ForEach-Object { Write-Log "  version: $_" }
     } else {
-        Write-LogWarn 'Write-GoldenVersion.ps1 not found — skipping version stamp'
+        Write-LogWarn 'Write-GoldenVersion.ps1 not found -- skipping version stamp'
     }
 
-    Write-Log '========== PHASE 3 COMPLETE — RUNNER IS OPERATIONAL =========='
+    if ($Script:RunnerRegistrationFailed) {
+        Write-LogError '========== PHASE 3 COMPLETE -- RUNNER IS DEGRADED (registration or service failed) =========='
+    } else {
+        Write-Log '========== PHASE 3 COMPLETE -- RUNNER IS OPERATIONAL =========='
+    }
 }
 
 # ============================================================

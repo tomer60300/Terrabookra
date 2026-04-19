@@ -1,12 +1,12 @@
-<#
+﻿<#
 .SYNOPSIS
-    Configuration — all settings, paths, and constants for the GitLab Runner golden image.
+    Configuration -- all settings, paths, and constants for the GitLab Runner golden image.
 
 .DESCRIPTION
     Dot-sourced by Install-GitLabRunner.ps1 before anything else runs.
     Defines $Script:Config (hashtable) and resolves the data drive (E: preferred, C: fallback).
 
-    Edit the values below to match your environment. Credentials are placeholders —
+    Edit the values below to match your environment. Credentials are placeholders --
     replace before uploading to MinIO.
 
 .NOTES
@@ -21,7 +21,7 @@
 $Script:DataDrive = if (Test-Path 'E:\') { 'E:' } else { 'C:' }
 
 # ============================================================
-# BASE URLs — Single source of truth for all hostnames/servers.
+# BASE URLs -- Single source of truth for all hostnames/servers.
 # Edit ONLY these variables; everything else derives from them.
 # ============================================================
 
@@ -69,7 +69,7 @@ $Script:Config = @{
     ArtifactoryHost  = $_artifactoryHost
     Be1Host          = $_be1Host
 
-    # --- Paths (C: drive — OS, binaries, tools) ---
+    # --- Paths (C: drive -- OS, binaries, tools) ---
     RunnerDir        = 'C:\GitLab-Runner'
     RunnerBin        = 'C:\GitLab-Runner\gitlab-runner.exe'
     ConfigToml       = 'C:\GitLab-Runner\config.toml'
@@ -82,7 +82,7 @@ $Script:Config = @{
     DaemonJson       = 'C:\ProgramData\docker\config\daemon.json'
     DockerDir        = 'C:\Program Files\Docker'
 
-    # --- Paths (E: drive preferred — resolved from $DataDrive) ---
+    # --- Paths (E: drive preferred -- resolved from $DataDrive) ---
     BuildsDir        = "$Script:DataDrive\GitLab-Runner\builds"
     CacheDir         = "$Script:DataDrive\GitLab-Runner\cache"
     DockerDataRoot   = "$Script:DataDrive\docker-data"
@@ -153,7 +153,7 @@ $Script:Config = @{
     }
 
     # --- Golden image version ---
-    GoldenImageVersion = '2.3.0'
+    GoldenImageVersion = '2.3.1'
 
     # --- Services to disable ---
     DisableServices = @(
@@ -165,7 +165,7 @@ $Script:Config = @{
 }
 
 # ============================================================
-# DERIVED VALUES — Built from base URLs (do NOT hardcode hosts below)
+# DERIVED VALUES -- Built from base URLs (do NOT hardcode hosts below)
 # ============================================================
 
 $Script:Config.PrePullImages = @(

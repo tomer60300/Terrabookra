@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Fleet command runner — execute a command across all runners via PSRemoting.
+    Fleet command runner -- execute a command across all runners via PSRemoting.
 
 .DESCRIPTION
     Run this from your ADMIN PC (not on the runners).
@@ -73,7 +73,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ── Validate input ───────────────────────────────────────────
+# -- Validate input -------------------------------------------
 if (-not $Command -and -not $ScriptFile) {
     Write-Error 'Provide either -Command or -ScriptFile'
     return
@@ -90,14 +90,14 @@ if ($ScriptFile) {
     $scriptBlock = [ScriptBlock]::Create($Command)
 }
 
-# ── Display intent ───────────────────────────────────────────
+# -- Display intent -------------------------------------------
 $cmdDisplay = if ($ScriptFile) { "ScriptFile: $ScriptFile" } else { $Command }
 Write-Output "`n  Targets: $($Runners -join ', ')"
 Write-Output "  Command: $cmdDisplay"
 Write-Output "  Throttle: $ThrottleLimit"
 Write-Output ''
 
-# ── Execute ──────────────────────────────────────────────────
+# -- Execute --------------------------------------------------
 $invokeParams = @{
     ComputerName  = $Runners
     ScriptBlock   = $scriptBlock
@@ -109,11 +109,11 @@ if ($Credential) { $invokeParams.Credential = $Credential }
 
 $results = Invoke-Command @invokeParams
 
-# ── Display results grouped by host ──────────────────────────
+# -- Display results grouped by host --------------------------
 if ($results) {
     $grouped = $results | Group-Object -Property PSComputerName
     foreach ($group in $grouped) {
-        Write-Output "─── $($group.Name) ───"
+        Write-Output "--- $($group.Name) ---"
         $group.Group | ForEach-Object {
             # Strip PSComputerName from output if it's a simple value
             if ($_ -is [PSCustomObject] -or $_ -is [hashtable]) {
@@ -125,7 +125,7 @@ if ($results) {
     }
 }
 
-# ── Report unreachable hosts ─────────────────────────────────
+# -- Report unreachable hosts ---------------------------------
 $reached = @()
 if ($results) {
     $reached = $results | Select-Object -ExpandProperty PSComputerName -Unique

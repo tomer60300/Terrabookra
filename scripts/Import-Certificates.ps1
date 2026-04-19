@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Fetch certificates from MinIO S3 and import into the Windows Trusted Root store.
 
@@ -9,16 +9,16 @@
 
     Called during Phase 1 (step 1.10).
 
-    This is an ADDITIONAL trust layer — GIT_SSL_NO_VERIFY and insecure-registries
+    This is an ADDITIONAL trust layer -- GIT_SSL_NO_VERIFY and insecure-registries
     remain as fallback bypasses.
 
 .NOTES
     File: scripts/Import-Certificates.ps1
     Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
     Event IDs:
-      9020 — Certificate imported successfully
-      9021 — Certificate import failed
-      9022 — Certificate download from S3 failed
+      9020 -- Certificate imported successfully
+      9021 -- Certificate import failed
+      9022 -- Certificate download from S3 failed
 
     Default cert location: C:\GitLab-Runner\certs\
 #>
@@ -32,12 +32,12 @@ if (-not $CertsDir) { $CertsDir = 'C:\GitLab-Runner\certs' }
 $ErrorActionPreference = 'Continue'
 $source = 'GitLabRunner'
 
-# ── Ensure certs directory exists ────────────────────────────
+# -- Ensure certs directory exists ----------------------------
 if (-not (Test-Path $CertsDir)) {
     New-Item -Path $CertsDir -ItemType Directory -Force | Out-Null
 }
 
-# ── Step 1: Fetch certificates from MinIO S3 ────────────────
+# -- Step 1: Fetch certificates from MinIO S3 ----------------
 $s3Certs = $Script:Config.S3Certs
 if ($s3Certs -and $s3Certs.Count -gt 0) {
     Write-Output "Fetching $($s3Certs.Count) certificate(s) from S3..."
@@ -54,10 +54,10 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
         }
     }
 } else {
-    Write-Output "No S3 certificate keys configured — scanning local certs only"
+    Write-Output "No S3 certificate keys configured -- scanning local certs only"
 }
 
-# ── Step 2: Import all certs found in CertsDir ──────────────
+# -- Step 2: Import all certs found in CertsDir --------------
 $certFiles = Get-ChildItem -Path $CertsDir -File | Where-Object {
     $_.Extension -in '.crt', '.cer', '.pem'
 }
@@ -83,20 +83,20 @@ foreach ($file in $certFiles) {
         # Check if already trusted
         $existing = $store.Certificates | Where-Object { $_.Thumbprint -eq $thumbprint }
         if ($existing) {
-            Write-Output "  [SKIP] $($file.Name) — already in Trusted Root (thumbprint: $thumbprint)"
+            Write-Output "  [SKIP] $($file.Name) -- already in Trusted Root (thumbprint: $thumbprint)"
             $skipped++
             continue
         }
 
         $store.Add($cert)
         $imported++
-        Write-Output "  [OK] $($file.Name) — imported to Trusted Root (thumbprint: $thumbprint, subject: $($cert.Subject))"
+        Write-Output "  [OK] $($file.Name) -- imported to Trusted Root (thumbprint: $thumbprint, subject: $($cert.Subject))"
 
         Write-EventLog -LogName Application -Source $source -EventId 9020 -EntryType Information `
             -Message "Certificate imported: $($file.Name) | Subject: $($cert.Subject) | Thumbprint: $thumbprint"
     }
     catch {
-        Write-Output "  [FAIL] $($file.Name) — $_"
+        Write-Output "  [FAIL] $($file.Name) -- $_"
         Write-EventLog -LogName Application -Source $source -EventId 9021 -EntryType Warning `
             -Message "Certificate import failed: $($file.Name) | Error: $_"
     }

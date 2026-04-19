@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Runner log collector — bundles all logs + diagnostics into a single zip.
+    Runner log collector -- bundles all logs + diagnostics into a single zip.
 
 .DESCRIPTION
     One command to collect everything you need when debugging a failed job
@@ -34,7 +34,7 @@
     How many hours of Event Log to export. Default: 24.
 
 .PARAMETER JobId
-    Optional — if provided, only collects logs relevant to that job timeframe.
+    Optional -- if provided, only collects logs relevant to that job timeframe.
 
 .OUTPUTS
     Full path to the created zip file.
@@ -64,16 +64,16 @@ $runnerBin  = Join-Path $RunnerDir 'gitlab-runner.exe'
 $configToml = Join-Path $RunnerDir 'config.toml'
 $versionFile = Join-Path $RunnerDir '.golden-version'
 
-# ── Create temp collection directory ─────────────────────────
+# -- Create temp collection directory -------------------------
 New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
-# ── 1. Install log ──────────────────────────────────────────
+# -- 1. Install log ------------------------------------------
 $installLog = Join-Path $logsDir 'install.log'
 if (Test-Path $installLog) {
     Copy-Item $installLog (Join-Path $tempDir 'install.log') -Force
 }
 
-# ── 2-4. Daily logs (jobs, network, rdp) ────────────────────
+# -- 2-4. Daily logs (jobs, network, rdp) --------------------
 foreach ($sub in @('jobs', 'network', 'rdp')) {
     $srcDir = Join-Path $logsDir $sub
     if (Test-Path $srcDir) {
@@ -86,7 +86,7 @@ foreach ($sub in @('jobs', 'network', 'rdp')) {
     }
 }
 
-# ── 5. Maintenance logs ─────────────────────────────────────
+# -- 5. Maintenance logs -------------------------------------
 $maintDir = Join-Path $tempDir 'maintenance'
 New-Item -Path $maintDir -ItemType Directory -Force | Out-Null
 $maintFiles = @(
@@ -99,7 +99,7 @@ foreach ($f in $maintFiles) {
     if (Test-Path $src) { Copy-Item $src (Join-Path $maintDir $f) -Force }
 }
 
-# ── 6. Docker diagnostics ───────────────────────────────────
+# -- 6. Docker diagnostics -----------------------------------
 $dockerDir = Join-Path $tempDir 'docker'
 New-Item -Path $dockerDir -ItemType Directory -Force | Out-Null
 
@@ -110,7 +110,7 @@ try { docker system df 2>&1   | Out-File (Join-Path $dockerDir 'docker-disk.txt'
 
 if (Test-Path $DaemonJson) { Copy-Item $DaemonJson (Join-Path $dockerDir 'daemon.json') -Force }
 
-# ── 7. Runner diagnostics ───────────────────────────────────
+# -- 7. Runner diagnostics -----------------------------------
 $runnerOutDir = Join-Path $tempDir 'runner'
 New-Item -Path $runnerOutDir -ItemType Directory -Force | Out-Null
 
@@ -125,7 +125,7 @@ $svcStatus = Get-Service gitlab-runner, docker -ErrorAction SilentlyContinue |
     Select-Object Name, Status, StartType | Format-Table -AutoSize | Out-String
 $svcStatus | Out-File (Join-Path $runnerOutDir 'services.txt') -Encoding UTF8
 
-# ── 8. Windows Event Log (Application, last N hours) ────────
+# -- 8. Windows Event Log (Application, last N hours) --------
 $evtDir = Join-Path $tempDir 'eventlog'
 New-Item -Path $evtDir -ItemType Directory -Force | Out-Null
 
@@ -140,7 +140,7 @@ try {
     Export-Csv (Join-Path $evtDir 'application-events.csv') -NoTypeInformation -Encoding UTF8
 } catch {}
 
-# ── 9. System info snapshot ──────────────────────────────────
+# -- 9. System info snapshot ----------------------------------
 $sysInfo = [ordered]@{
     Hostname     = $hostname
     Timestamp    = Get-Date -Format 'o'
@@ -163,12 +163,12 @@ $sysInfo.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" } |
     Out-File (Join-Path $tempDir 'system-info.txt') -Encoding UTF8
 $adapters | Out-File (Join-Path $tempDir 'system-info.txt') -Append -Encoding UTF8
 
-# ── 10. Golden image version stamp ───────────────────────────
+# -- 10. Golden image version stamp ---------------------------
 if (Test-Path $versionFile) {
     Copy-Item $versionFile (Join-Path $tempDir 'golden-version.txt') -Force
 }
 
-# ── Create zip ───────────────────────────────────────────────
+# -- Create zip -----------------------------------------------
 if (-not (Test-Path $OutputDir)) { New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null }
 
 Compress-Archive -Path "$tempDir\*" -DestinationPath $zipPath -Force

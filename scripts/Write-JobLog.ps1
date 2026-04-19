@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Job wrapper logger — logs CI job start/end to a daily file on the host.
+    Job wrapper logger -- logs CI job start/end to a daily file on the host.
 
 .DESCRIPTION
     Called from config.toml as pre_build_script (action=start) and
@@ -44,7 +44,7 @@ $ErrorActionPreference = 'Continue'
 
 if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 
-# ── Gather job info from CI environment variables ────────────
+# -- Gather job info from CI environment variables ------------
 $now         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
 $today       = Get-Date -Format 'yyyy-MM-dd'
 $jobId       = if ($env:CI_JOB_ID)           { $env:CI_JOB_ID }           else { 'unknown' }
@@ -58,7 +58,7 @@ $hostname    = $env:COMPUTERNAME
 
 $logFile = Join-Path $LogDir "jobs-$today.log"
 
-# ── Write log line ───────────────────────────────────────────
+# -- Write log line -------------------------------------------
 if ($Action -eq 'start') {
     # Store start time for duration calculation
     $startFile = Join-Path $env:TEMP "job-start-$jobId.txt"
@@ -85,7 +85,7 @@ else {
 
 $line | Out-File $logFile -Append -Encoding UTF8
 
-# ── Rotate old logs ──────────────────────────────────────────
+# -- Rotate old logs ------------------------------------------
 Get-ChildItem $LogDir -Filter 'jobs-*.log' | Where-Object {
     $_.LastWriteTime -lt (Get-Date).AddDays(-$MaxAgeDays)
 } | Remove-Item -Force -ErrorAction SilentlyContinue

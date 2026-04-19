@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Phase 2 — Docker daemon.json + binary install + service registration.
+    Phase 2 -- Docker daemon.json + binary install + service registration.
 
 .DESCRIPTION
     Called after Phase 1 marker is detected.
@@ -20,8 +20,15 @@
 function Invoke-Phase2 {
     Write-Log '========== PHASE 2: Docker Installation =========='
 
-    # ── 2.1 Write daemon.json ────────────────────────────────
+    # -- 2.1 Write daemon.json --------------------------------
     Write-Log '2.1 Write daemon.json'
+
+    # Ensure docker-users group exists (raw binary install does not create it)
+    if (-not (Get-LocalGroup -Name 'docker-users' -ErrorAction SilentlyContinue)) {
+        New-LocalGroup -Name 'docker-users' -Description 'Docker daemon pipe access'
+        Write-Log 'Created local group: docker-users'
+    }
+
     $dnsServers = Get-DnsServer
     $daemonConfig = [ordered]@{
         'insecure-registries'      = $Script:Config.InsecureRegistries
@@ -45,7 +52,7 @@ function Invoke-Phase2 {
         New-Item -Path $Script:Config.DockerDataRoot -ItemType Directory -Force | Out-Null
     }
 
-    # ── 2.2 Download Docker binaries ─────────────────────────
+    # -- 2.2 Download Docker binaries -------------------------
     Write-Log '2.2 Download Docker binaries'
     $dockerExe  = Join-Path $Script:Config.DockerDir 'docker.exe'
     $dockerdExe = Join-Path $Script:Config.DockerDir 'dockerd.exe'
@@ -57,7 +64,7 @@ function Invoke-Phase2 {
         Write-LogError 'FATAL: dockerd.exe download failed'; exit 1
     }
 
-    # ── 2.3 Register dockerd as Windows service ──────────────
+    # -- 2.3 Register dockerd as Windows service --------------
     Write-Log '2.3 Register Docker service'
     $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
 
@@ -82,13 +89,13 @@ function Invoke-Phase2 {
         Start-Sleep -Seconds 10
     }
 
-    # ── Mark + dispatch ──────────────────────────────────────
+    # -- Mark + dispatch --------------------------------------
     Set-PhaseMarker $Script:Config.Phase2Marker
     Write-Log '========== PHASE 2 COMPLETE =========='
 
     $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
     if (-not $dockerSvc -or $dockerSvc.Status -ne 'Running') {
-        Invoke-Be1Reboot -Reason 'Phase 2 complete — Docker installed, reboot required'
+        Invoke-Be1Reboot -Reason 'Phase 2 complete -- Docker installed, reboot required'
     } else {
         Write-Log 'Docker running, continuing to Phase 3...'
         Invoke-Phase3

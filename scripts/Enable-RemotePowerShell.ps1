@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Enable WinRM PSRemoting on this VM for remote PowerShell access.
 
@@ -6,7 +6,7 @@
     Configures WinRM for remote management:
     1. Enable PSRemoting
     2. Set WinRM service to auto-start
-    3. Configure TrustedHosts (optional — for non-domain or cross-domain)
+    3. Configure TrustedHosts (optional -- for non-domain or cross-domain)
     4. Open firewall for WinRM (TCP 5985/5986)
     5. Set MaxMemoryPerShellMB for heavy operations
 
@@ -29,26 +29,26 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ── 1. Enable PSRemoting ─────────────────────────────────────
+# -- 1. Enable PSRemoting -------------------------------------
 Write-Output '1. Enable PSRemoting...'
 Enable-PSRemoting -Force -SkipNetworkProfileCheck 2>&1 | ForEach-Object { Write-Output "  $_" }
 
-# ── 2. WinRM service auto-start ──────────────────────────────
+# -- 2. WinRM service auto-start ------------------------------
 Write-Output '2. Set WinRM service to auto-start...'
 Set-Service -Name WinRM -StartupType Automatic
 Start-Service -Name WinRM -ErrorAction SilentlyContinue
 
-# ── 3. TrustedHosts ──────────────────────────────────────────
+# -- 3. TrustedHosts ------------------------------------------
 Write-Output "3. Set TrustedHosts: $TrustedHosts"
 Set-Item WSMan:\localhost\Client\TrustedHosts -Value $TrustedHosts -Force
 
-# ── 4. WinRM config tuning ───────────────────────────────────
+# -- 4. WinRM config tuning -----------------------------------
 Write-Output '4. Configure WinRM limits...'
 Set-Item WSMan:\localhost\Shell\MaxMemoryPerShellMB -Value 2048 -Force
 Set-Item WSMan:\localhost\Shell\MaxShellsPerUser -Value 30 -Force
 Set-Item WSMan:\localhost\Plugin\microsoft.powershell\Quotas\MaxMemoryPerShellMB -Value 2048 -Force
 
-# ── 5. Firewall rules ────────────────────────────────────────
+# -- 5. Firewall rules ----------------------------------------
 Write-Output '5. Configure firewall rules...'
 $rules = @(
     @{ Name = 'WinRM-HTTP';  Port = 5985; Description = 'WinRM HTTP' },
@@ -65,11 +65,11 @@ foreach ($r in $rules) {
     }
 }
 
-# ── 6. Restart WinRM ─────────────────────────────────────────
+# -- 6. Restart WinRM -----------------------------------------
 Write-Output '6. Restart WinRM...'
 Restart-Service WinRM
 
-# ── Verify ───────────────────────────────────────────────────
+# -- Verify ---------------------------------------------------
 $status = (Get-Service WinRM).Status
 $listener = Get-ChildItem WSMan:\localhost\Listener -ErrorAction SilentlyContinue
 Write-Output "`nWinRM Status: $status"

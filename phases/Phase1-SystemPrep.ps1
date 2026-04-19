@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Phase 1 — System preparation, services, environment, Windows features.
+    Phase 1 -- System preparation, services, environment, Windows features.
 
 .DESCRIPTION
     Called by Install-GitLabRunner.ps1 when no phase markers exist.
@@ -27,7 +27,7 @@
 function Invoke-Phase1 {
     Write-Log '========== PHASE 1: System Preparation =========='
 
-    # ── 1.0 Pre-flight dependency validation ─────────────────
+    # -- 1.0 Pre-flight dependency validation -----------------
     Write-Log '1.0 Pre-flight dependency validation (DNS + S3 + Harbor)'
     $depScript = Join-Path $PSScriptRoot '..\validation\Test-Dependencies.ps1'
     if (-not (Test-Path $depScript)) {
@@ -39,22 +39,22 @@ function Invoke-Phase1 {
         $depScript = $depScriptLocal
     }
     if (Test-Path $depScript) {
-        $depResult = & $depScript 2>&1
+        # Run in subprocess -- Test-Dependencies.ps1 uses exit which would kill us
+        $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript 2>&1
+        $depExit   = $LASTEXITCODE
         $depResult | ForEach-Object { Write-Log "  dep: $_" }
-        # Extract summary — last object is the PSCustomObject
-        $summary = $depResult | Where-Object { $_ -is [PSCustomObject] -and $_.Failed -ne $null } | Select-Object -Last 1
-        if ($summary -and $summary.Failed -gt 0) {
-            Write-LogWarn "Dependency check: $($summary.Failed) of $($summary.Total) failed — install may fail later"
+        if ($depExit -ne 0) {
+            Write-LogWarn "Dependency check: $depExit failures detected -- install may fail later"
         }
     } else {
-        Write-LogWarn 'Test-Dependencies.ps1 not found — skipping pre-flight check'
+        Write-LogWarn 'Test-Dependencies.ps1 not found -- skipping pre-flight check'
     }
 
-    # ── 1.1 Event Log source ─────────────────────────────────
+    # -- 1.1 Event Log source ---------------------------------
     Write-Log '1.1 Register Event Log source'
     New-EventLog -LogName Application -Source 'GitLabRunner' -ErrorAction SilentlyContinue
 
-    # ── 1.2 Disable unnecessary services ─────────────────────
+    # -- 1.2 Disable unnecessary services ---------------------
     Write-Log '1.2 Disable unnecessary Windows services'
     foreach ($svc in $Script:Config.DisableServices) {
         $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
@@ -65,11 +65,11 @@ function Invoke-Phase1 {
     }
     Write-Log "Processed $($Script:Config.DisableServices.Count) services"
 
-    # ── 1.3 Power plan ───────────────────────────────────────
+    # -- 1.3 Power plan ---------------------------------------
     Write-Log '1.3 Set High Performance power plan'
     powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
 
-    # ── 1.4 Page file ────────────────────────────────────────
+    # -- 1.4 Page file ----------------------------------------
     Write-Log '1.4 Configure page file'
     try {
         $ramGB = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
@@ -83,7 +83,7 @@ function Invoke-Phase1 {
     }
     catch { Write-LogWarn "Page file config failed: $_" }
 
-    # ── 1.5 Network tuning + long paths ──────────────────────
+    # -- 1.5 Network tuning + long paths ----------------------
     Write-Log '1.5 Network tuning + long paths'
     Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Type DWord
     netsh int tcp set global autotuninglevel=normal 2>$null
@@ -93,7 +93,7 @@ function Invoke-Phase1 {
     Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects' -Name 'VisualFXSetting' -Value 2 -Type DWord -ErrorAction SilentlyContinue
     Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop\WindowMetrics' -Name 'MinAnimate' -Value '0' -ErrorAction SilentlyContinue
 
-    # ── 1.6 Environment variables + PATH ─────────────────────
+    # -- 1.6 Environment variables + PATH ---------------------
     Write-Log '1.6 Set environment variables'
     [System.Environment]::SetEnvironmentVariable('GIT_SSL_NO_VERIFY', 'true', 'Machine')
     [System.Environment]::SetEnvironmentVariable('DOTNET_CLI_TELEMETRY_OPTOUT', '1', 'Machine')
@@ -105,7 +105,7 @@ function Invoke-Phase1 {
     [System.Environment]::SetEnvironmentVariable('PATH', $currentPath, 'Machine')
     $env:PATH = $currentPath
 
-    # ── 1.7 Directory structure ──────────────────────────────
+    # -- 1.7 Directory structure ------------------------------
     Write-Log '1.7 Create directory structure'
     foreach ($d in @(
         $Script:Config.RunnerDir, $Script:Config.BuildsDir, $Script:Config.CacheDir,
@@ -116,13 +116,13 @@ function Invoke-Phase1 {
         if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
     }
 
-    # ── 1.8 Event Log sizes ─────────────────────────────────
+    # -- 1.8 Event Log sizes ---------------------------------
     Write-Log '1.8 Event Log sizes'
     wevtutil sl Application /ms:104857600 2>$null
     wevtutil sl System /ms:104857600 2>$null
     wevtutil sl Security /ms:52428800 2>$null
 
-    # ── 1.9 Windows Features ─────────────────────────────────
+    # -- 1.9 Windows Features ---------------------------------
     Write-Log '1.9 Install Windows Features (Containers, Hyper-V)'
     $needReboot = $false
 
@@ -140,7 +140,7 @@ function Invoke-Phase1 {
         if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
     } else { Write-Log 'Hyper-V: already installed' }
 
-    # ── 1.10 Import self-signed certificates ─────────────────
+    # -- 1.10 Import self-signed certificates -----------------
     Write-Log '1.10 Import self-signed certificates'
     # Download script from S3 first (Phase 3 not yet run on fresh VM)
     $importScript = Join-Path $Script:Config.ScriptsDir 'Import-Certificates.ps1'
@@ -151,10 +151,10 @@ function Invoke-Phase1 {
     if (Test-Path $importScript) {
         & $importScript -CertsDir $Script:Config.CertsDir 2>&1 | ForEach-Object { Write-Log "  certs: $_" }
     } else {
-        Write-LogWarn 'Import-Certificates.ps1 not found — skipping cert import'
+        Write-LogWarn 'Import-Certificates.ps1 not found -- skipping cert import'
     }
 
-    # ── 1.11 Enable WinRM (remote PowerShell) ────────────────
+    # -- 1.11 Enable WinRM (remote PowerShell) ----------------
     Write-Log '1.11 Enable WinRM for remote PowerShell'
     # Download script from S3 first (Phase 3 not yet run on fresh VM)
     $winrmScript = Join-Path $Script:Config.ScriptsDir 'Enable-RemotePowerShell.ps1'
@@ -165,20 +165,20 @@ function Invoke-Phase1 {
     if (Test-Path $winrmScript) {
         & $winrmScript 2>&1 | ForEach-Object { Write-Log "  winrm: $_" }
     } else {
-        Write-LogWarn 'Enable-RemotePowerShell.ps1 not found — skipping WinRM setup'
+        Write-LogWarn 'Enable-RemotePowerShell.ps1 not found -- skipping WinRM setup'
     }
 
-    # ── 1.12 Enable RDP audit policy ─────────────────────────
+    # -- 1.12 Enable RDP audit policy -------------------------
     Write-Log '1.12 Enable RDP logon audit policy'
     auditpol /set /subcategory:"Logon" /success:enable /failure:enable 2>$null
     Write-Log 'Logon audit policy enabled'
 
-    # ── Mark + dispatch ──────────────────────────────────────
+    # -- Mark + dispatch --------------------------------------
     Set-PhaseMarker $Script:Config.Phase1Marker
     Write-Log '========== PHASE 1 COMPLETE =========='
 
     if ($needReboot) {
-        Invoke-Be1Reboot -Reason 'Phase 1 complete — Windows features require reboot'
+        Invoke-Be1Reboot -Reason 'Phase 1 complete -- Windows features require reboot'
     } else {
         Write-Log 'No reboot needed, continuing to Phase 2...'
         Invoke-Phase2

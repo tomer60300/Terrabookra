@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    Network connectivity monitor — tests TCP connectivity to defined hosts.
+    Network connectivity monitor -- tests TCP connectivity to defined hosts.
 
 .DESCRIPTION
     Runs every 2 minutes via scheduled task (Network-Connectivity-Monitor).
@@ -9,7 +9,7 @@
     Host list is loaded from (in priority order):
       1. -Hosts parameter (if passed)
       2. C:\GitLab-Runner\scripts\monitor-hosts.json (deployed by Phase 3 from Config)
-      3. Empty — script exits with warning
+      3. Empty -- script exits with warning
 
     When a pipeline fails with a timeout, grep the CSV for that time window:
       Import-Csv C:\GitLab-Runner\logs\network\net-2026-04-16.csv |
@@ -43,7 +43,7 @@ $ErrorActionPreference = 'Continue'
 
 if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 
-# ── Load hosts from JSON config if not passed ────────────────
+# -- Load hosts from JSON config if not passed ----------------
 if (-not $Hosts -or $Hosts.Count -eq 0) {
     $configJson = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts\monitor-hosts.json'
     if (-not (Test-Path $configJson)) {
@@ -68,7 +68,7 @@ if (-not $Hosts -or $Hosts.Count -eq 0) {
     return
 }
 
-# ── Daily CSV file ───────────────────────────────────────────
+# -- Daily CSV file -------------------------------------------
 $today   = Get-Date -Format 'yyyy-MM-dd'
 $csvFile = Join-Path $LogDir "net-$today.csv"
 
@@ -77,7 +77,7 @@ if (-not (Test-Path $csvFile)) {
     'Timestamp,Host,Port,Success,LatencyMs,Error' | Out-File $csvFile -Encoding UTF8
 }
 
-# ── Test each host ───────────────────────────────────────────
+# -- Test each host -------------------------------------------
 $now = Get-Date -Format 'o'
 
 foreach ($h in $Hosts) {
@@ -103,7 +103,7 @@ foreach ($h in $Hosts) {
     "$now,$host_,$port,$success,$latency,$error_" | Out-File $csvFile -Append -Encoding UTF8
 }
 
-# ── Rotate old logs ──────────────────────────────────────────
+# -- Rotate old logs ------------------------------------------
 Get-ChildItem $LogDir -Filter 'net-*.csv' | Where-Object {
     $_.LastWriteTime -lt (Get-Date).AddDays(-$MaxAgeDays)
 } | Remove-Item -Force -ErrorAction SilentlyContinue

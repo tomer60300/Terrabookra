@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Write a golden image version stamp to a JSON file.
 
@@ -42,7 +42,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ── Gather component versions ────────────────────────────────
+# -- Gather component versions --------------------------------
 $runnerVersion = 'unknown'
 try {
     $out = & $RunnerBin --version 2>&1 | Out-String
@@ -65,7 +65,7 @@ if (Test-Path $GitExe) {
 
 $osBuild = [System.Environment]::OSVersion.Version.Build
 
-# ── Build stamp ──────────────────────────────────────────────
+# -- Build stamp ----------------------------------------------
 $stamp = [ordered]@{
     ImageVersion   = $ImageVersion
     BuildDate      = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')

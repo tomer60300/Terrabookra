@@ -1,21 +1,21 @@
-<#
+﻿<#
 .SYNOPSIS
-    Pre-flight dependency validator — DNS, MinIO S3 objects, Harbor images.
+    Pre-flight dependency validator -- DNS, MinIO S3 objects, Harbor images.
 
 .DESCRIPTION
     Dry-checks that every external dependency is reachable BEFORE the install
     begins. No files are downloaded; no images are pulled.
 
     Three check categories:
-      1. DNS — resolves every hostname from Config.MonitorHosts
-      2. MinIO S3 — HEAD request (AWS SigV4) for all 25 S3 objects
-      3. Harbor — Registry API v2 manifest HEAD for all pre-pull images
+      1. DNS -- resolves every hostname from Config.MonitorHosts
+      2. MinIO S3 -- HEAD request (AWS SigV4) for all 25 S3 objects
+      3. Harbor -- Registry API v2 manifest HEAD for all pre-pull images
 
     Can run in two modes:
       Standalone  : dot-sources lib/Config.ps1 (and lib/Common.ps1 for TLS bypass)
       Integrated  : called from the orchestrator where $Script:Config already exists
 
-    Usage (standalone — from the project root):
+    Usage (standalone -- from the project root):
       .\validation\Test-Dependencies.ps1
 
     Usage (from admin PC targeting a runner):
@@ -50,7 +50,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 # ============================================================
-# BOOTSTRAP — load Config if not already dot-sourced
+# BOOTSTRAP -- load Config if not already dot-sourced
 # ============================================================
 
 if (-not $Script:Config) {
@@ -63,7 +63,7 @@ if (-not $Script:Config) {
     if (Test-Path $configPath) {
         . $configPath
     } else {
-        Write-Host '[FATAL] Cannot find lib\Config.ps1 — run from project root or ensure $Script:Config is loaded.' -ForegroundColor Red
+        Write-Host '[FATAL] Cannot find lib\Config.ps1 -- run from project root or ensure $Script:Config is loaded.' -ForegroundColor Red
         exit 1
     }
 }
@@ -101,7 +101,7 @@ function Add-Result {
     $color  = if ($Ok) { 'Green' } else { 'Red' }
     Write-Host "  [$status] " -ForegroundColor $color -NoNewline
     Write-Host "$Category | $Target" -NoNewline
-    if ($Detail) { Write-Host " — $Detail" -ForegroundColor DarkGray } else { Write-Host '' }
+    if ($Detail) { Write-Host " -- $Detail" -ForegroundColor DarkGray } else { Write-Host '' }
     [void]$results.Add([PSCustomObject]@{
         Category = $Category
         Target   = $Target
@@ -111,7 +111,7 @@ function Add-Result {
 }
 
 Write-Host "`n=====================================================" -ForegroundColor Cyan
-Write-Host '  DEPENDENCY VALIDATION — Pre-flight Check' -ForegroundColor Cyan
+Write-Host '  DEPENDENCY VALIDATION -- Pre-flight Check' -ForegroundColor Cyan
 Write-Host "=====================================================`n" -ForegroundColor Cyan
 
 # ============================================================
@@ -137,7 +137,7 @@ if (-not $SkipDns) {
 }
 
 # ============================================================
-# 2. MinIO S3 ARTIFACT CHECK (HEAD — no download)
+# 2. MinIO S3 ARTIFACT CHECK (HEAD -- no download)
 # ============================================================
 
 if (-not $SkipS3) {
@@ -169,7 +169,7 @@ if (-not $SkipS3) {
 
     function Send-S3Head {
         <#
-        .SYNOPSIS  AWS SigV4 HEAD request — returns status code (200 = exists, 404 = missing).
+        .SYNOPSIS  AWS SigV4 HEAD request -- returns status code (200 = exists, 404 = missing).
         #>
         param([string]$Key)
 
@@ -264,7 +264,7 @@ if (-not $SkipS3) {
 }
 
 # ============================================================
-# 3. HARBOR IMAGE CHECK (Registry API v2 — no pull)
+# 3. HARBOR IMAGE CHECK (Registry API v2 -- no pull)
 # ============================================================
 
 if (-not $SkipHarbor) {
@@ -299,7 +299,7 @@ if (-not $SkipHarbor) {
         $webEx = $_.Exception
         if ($webEx.Response) {
             $code = [int]$webEx.Response.StatusCode
-            # 401 means registry is up but needs auth — still reachable
+            # 401 means registry is up but needs auth -- still reachable
             $registryUp = ($code -eq 401)
             $webEx.Response.Close()
         }
@@ -312,9 +312,9 @@ if (-not $SkipHarbor) {
     if ($registryUp) {
         foreach ($image in $Script:Config.PrePullImages) {
             # Parse: harbor.kayhut.com/golden-image/servercore:ltsc2019
-            #   → registry = harbor.kayhut.com
-            #   → repo     = golden-image/servercore
-            #   → tag      = ltsc2019
+            #   -> registry = harbor.kayhut.com
+            #   -> repo     = golden-image/servercore
+            #   -> tag      = ltsc2019
             $withoutRegistry = $image -replace "^$([regex]::Escape($Script:Config.HarborUrl))/", ''
             if ($withoutRegistry -match '^(.+):([^:]+)$') {
                 $repo = $Matches[1]
@@ -354,7 +354,7 @@ if (-not $SkipHarbor) {
                     $code = [int]$webEx.Response.StatusCode
                     $detail = "HTTP $code"
                     $webEx.Response.Close()
-                    # Try GET fallback — some registries don't support HEAD on manifests
+                    # Try GET fallback -- some registries don't support HEAD on manifests
                     if ($code -eq 405) {
                         try {
                             $req2 = [System.Net.HttpWebRequest]::Create($manifestUrl)
@@ -385,9 +385,9 @@ if (-not $SkipHarbor) {
             Add-Result -Category 'Harbor' -Target $image -Ok $imageOk -Detail $detail
         }
     } else {
-        # Registry unreachable — mark all images as failed
+        # Registry unreachable -- mark all images as failed
         foreach ($image in $Script:Config.PrePullImages) {
-            Add-Result -Category 'Harbor' -Target $image -Ok $false -Detail 'Skipped — registry unreachable'
+            Add-Result -Category 'Harbor' -Target $image -Ok $false -Detail 'Skipped -- registry unreachable'
         }
     }
     Write-Host ''
@@ -407,7 +407,7 @@ if ($failCount -eq 0) {
     Write-Host ''
     Write-Host '  Failed items:' -ForegroundColor Red
     $results | Where-Object { $_.Status -eq 'FAIL' } | ForEach-Object {
-        Write-Host "    - $($_.Category) | $($_.Target) — $($_.Detail)" -ForegroundColor Red
+        Write-Host "    - $($_.Category) | $($_.Target) -- $($_.Detail)" -ForegroundColor Red
     }
 }
 Write-Host "=====================================================`n" -ForegroundColor Cyan
@@ -432,7 +432,7 @@ try {
             -Message "Dependency validation: $failCount of $total checks FAILED.`n$failedList"
     }
 } catch {
-    # Event log source may not exist yet on a fresh VM — that's fine
+    # Event log source may not exist yet on a fresh VM -- that's fine
 }
 
 Write-Output $summary
