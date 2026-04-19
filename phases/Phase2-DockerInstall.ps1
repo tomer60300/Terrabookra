@@ -38,7 +38,7 @@ function Invoke-Phase2 {
     }
     if ($dnsServers.Count -gt 0) { $daemonConfig['dns'] = @($dnsServers) }
 
-    $daemonConfig | ConvertTo-Json -Depth 4 | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
+    ConvertTo-Json -InputObject $daemonConfig -Depth 4 | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
     Write-Log "daemon.json written (data-root: $($Script:Config.DockerDataRoot))"
 
     if (-not (Test-Path $Script:Config.DockerDataRoot)) {

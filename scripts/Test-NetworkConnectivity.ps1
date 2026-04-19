@@ -51,7 +51,7 @@ if (-not $Hosts -or $Hosts.Count -eq 0) {
     }
     if (Test-Path $configJson) {
         try {
-            $jsonHosts = Get-Content $configJson -Raw | ConvertFrom-Json
+            $jsonHosts = @(Get-Content $configJson -Raw | ConvertFrom-Json)
             $Hosts = @()
             foreach ($h in $jsonHosts) {
                 $Hosts += @{ Host = $h.Host; Port = [int]$h.Port }

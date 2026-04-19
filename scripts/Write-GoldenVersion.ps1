@@ -84,6 +84,6 @@ $stamp = [ordered]@{
     }
 }
 
-$stamp | ConvertTo-Json -Depth 3 | Out-File -FilePath $OutputPath -Encoding UTF8 -Force
+ConvertTo-Json -InputObject $stamp -Depth 3 | Out-File -FilePath $OutputPath -Encoding UTF8 -Force
 Write-Output "Golden image version stamp written: $OutputPath"
 Write-Output "  Image: $ImageVersion | Runner: $runnerVersion | Docker: $dockerVersion | Build: $osBuild"
