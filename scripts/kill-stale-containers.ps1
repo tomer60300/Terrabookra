@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Runs every 2 hours via scheduled task (Docker-Stale-Container-Kill).
-    Parses `docker ps` RunningFor field to detect containers running longer
-    than the threshold and force-kills them. Handles hours, days, and weeks.
+    Uses docker inspect StartedAt timestamp for precise age calculation.
+    Force-kills containers running longer than the threshold.
 
 .PARAMETER MaxAgeHours
     Hours before a running container is considered stale. Default: 4
@@ -30,25 +30,30 @@ if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Forc
 
 # -- Find and kill stale containers -------------------------------
 $killed = 0
-$containers = docker ps --format "{{.ID}} {{.RunningFor}}" 2>$null
+$now = Get-Date
+$containerIds = docker ps -q 2>$null
 
-foreach ($line in $containers) {
-    if ($line -match '^(\w+)\s+(.+)$') {
-        $id     = $Matches[1]
-        $runFor = $Matches[2]
+foreach ($id in $containerIds) {
+    if (-not $id) { continue }
+    try {
+        $startedStr = docker inspect --format '{{.State.StartedAt}}' $id 2>$null
+        if (-not $startedStr) { continue }
 
-        # Convert RunningFor text to approximate hours
-        $totalHours = 0
-        if ($runFor -match '(\d+)\s+weeks?')  { $totalHours += [int]$Matches[1] * 168 }
-        if ($runFor -match '(\d+)\s+days?')   { $totalHours += [int]$Matches[1] * 24 }
-        if ($runFor -match '(\d+)\s+hours?')  { $totalHours += [int]$Matches[1] }
+        # Docker returns ISO 8601: 2026-04-19T10:30:00.123456789Z
+        # Trim nanosecond precision to parse with .NET (max 7 fractional digits)
+        $startedStr = $startedStr -replace '(\.\d{7})\d+', '$1'
+        $startedAt = [datetime]::Parse($startedStr).ToLocalTime()
+        $ageHours  = ($now - $startedAt).TotalHours
 
-        if ($totalHours -ge $MaxAgeHours) {
+        if ($ageHours -ge $MaxAgeHours) {
             docker kill $id 2>&1 | Out-Null
             $killed++
-            "$(Get-Date -Format o) Killed container $id (running ~${totalHours}h, raw: $runFor)" |
+            $ageRound = [math]::Round($ageHours, 1)
+            "$(Get-Date -Format o) Killed container $id (running ${ageRound}h, started: $startedStr)" |
                 Out-File $LogFile -Append -Encoding UTF8
         }
+    } catch {
+        # Container may have exited between ps and inspect -- skip
     }
 }
 

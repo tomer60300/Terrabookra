@@ -76,16 +76,17 @@ $diskInfo = $diskParts -join ', '
 
 # -- Stale containers (running > 4 hours) -------------------------
 $staleCount = 0
-$containers = docker ps --format "{{.ID}} {{.RunningFor}}" 2>$null
-foreach ($line in $containers) {
-    if ($line -match '^(\w+)\s+') {
-        $runFor = $line -replace '^\w+\s+', ''
-        $isStale = $false
-        if ($runFor -match '(\d+)\s+weeks?')  { $isStale = $true }
-        if ($runFor -match '(\d+)\s+days?')   { $isStale = $true }
-        if ($runFor -match '(\d+)\s+hours?' -and [int]$Matches[1] -ge 4) { $isStale = $true }
-        if ($isStale) { $staleCount++ }
-    }
+$now = Get-Date
+$containerIds = docker ps -q 2>$null
+foreach ($id in $containerIds) {
+    if (-not $id) { continue }
+    try {
+        $startedStr = docker inspect --format '{{.State.StartedAt}}' $id 2>$null
+        if (-not $startedStr) { continue }
+        $startedStr = $startedStr -replace '(\.\d{7})\d+', '$1'
+        $startedAt = [datetime]::Parse($startedStr).ToLocalTime()
+        if (($now - $startedAt).TotalHours -ge 4) { $staleCount++ }
+    } catch {}
 }
 
 if ($staleCount -gt 0) {

@@ -126,7 +126,10 @@ $probe = {
     if ($result.DockerStatus -ne 'Running')  { $degraded += 'Docker' }
     if ($result.RunnerStatus -ne 'Running')  { $degraded += 'Runner' }
     if (-not $result.RunnerAlive)            { $degraded += 'RunnerNotAlive' }
-    if ($result.DiskFreeC_GB -lt 20)         { $degraded += 'DiskLow' }
+    if ($result.DiskFreeC_GB -lt 20)         { $degraded += 'DiskC' }
+    if ($result.DiskFreeE_GB -ne 'N/A' -and $result.DiskFreeE_GB -lt 20) {
+        $degraded += 'DiskE'
+    }
 
     if ($degraded.Count -gt 0) {
         $result.Status = "DEGRADED ($($degraded -join ', '))"
@@ -177,7 +180,7 @@ foreach ($runner in $Runners) {
 # -- Display --------------------------------------------------
 $results | Format-Table -AutoSize -Property @(
     'Hostname', 'Status', 'ImageVersion', 'Uptime',
-    'DiskFreeC_GB', 'DockerStatus', 'RunnerStatus',
+    'DiskFreeC_GB', 'DiskFreeE_GB', 'DockerStatus', 'RunnerStatus',
     'RunnerAlive', 'Containers'
 )
 

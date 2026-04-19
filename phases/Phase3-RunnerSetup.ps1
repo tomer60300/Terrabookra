@@ -160,8 +160,13 @@ function Invoke-Phase3 {
         }
     }
 
-    # Write (or overwrite) config.toml with our full config
-    $configContent = @"
+    # -- Gate: abort runner config/service if registration failed --
+    if ($Script:RunnerRegistrationFailed) {
+        Write-LogError '3.7 SKIPPING config.toml write + service install -- registration failed'
+        Write-LogError '    Fix: supply a valid glrt- token or restore GitLab connectivity, then re-run Phase 3'
+    } else {
+        # Write (or overwrite) config.toml with our full config
+        $configContent = @"
 # GitLab Runner Configuration -- Auto-generated
 # Host: $hostname | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
@@ -198,25 +203,26 @@ $dnsLine
   [runners.cache]
     Type = ""
 "@
-    $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
-    Write-Log 'config.toml written'
+        $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
+        Write-Log 'config.toml written'
 
-    # -- 3.8 Install runner service (idempotent) --------------
-    Write-Log '3.8 Install runner service'
-    & $Script:Config.RunnerBin stop 2>$null
-    & $Script:Config.RunnerBin uninstall 2>$null
-    Start-Sleep -Seconds 2
-    & $Script:Config.RunnerBin install `
-        --working-directory $Script:Config.RunnerDir `
-        --config $Script:Config.ConfigToml 2>&1 |
-        ForEach-Object { Write-Log "  install: $_" }
-    & $Script:Config.RunnerBin start 2>&1 | ForEach-Object { Write-Log "  start: $_" }
+        # -- 3.8 Install runner service (idempotent) --------------
+        Write-Log '3.8 Install runner service'
+        & $Script:Config.RunnerBin stop 2>$null
+        & $Script:Config.RunnerBin uninstall 2>$null
+        Start-Sleep -Seconds 2
+        & $Script:Config.RunnerBin install `
+            --working-directory $Script:Config.RunnerDir `
+            --config $Script:Config.ConfigToml 2>&1 |
+            ForEach-Object { Write-Log "  install: $_" }
+        & $Script:Config.RunnerBin start 2>&1 | ForEach-Object { Write-Log "  start: $_" }
 
-    if (Wait-ServiceRunning -Name 'gitlab-runner' -TimeoutSeconds 30 -PollSeconds 3) {
-        Write-Log 'GitLab Runner service is RUNNING'
-    } else {
-        Write-LogError 'GitLab Runner service failed to start'
-        $Script:RunnerRegistrationFailed = $true
+        if (Wait-ServiceRunning -Name 'gitlab-runner' -TimeoutSeconds 30 -PollSeconds 3) {
+            Write-Log 'GitLab Runner service is RUNNING'
+        } else {
+            Write-LogError 'GitLab Runner service failed to start'
+            $Script:RunnerRegistrationFailed = $true
+        }
     }
 
     # -- 3.9 Deploy maintenance scripts -----------------------
