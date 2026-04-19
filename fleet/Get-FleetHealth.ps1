@@ -23,6 +23,9 @@
 .PARAMETER Credential
     PSCredential for authentication. If omitted, uses current user (domain auth).
 
+.PARAMETER RunnerDir
+    Base runner directory on remote hosts. Default: C:\GitLab-Runner
+
 .PARAMETER ExportCsv
     Optional path to export results as CSV.
 
@@ -37,6 +40,8 @@ param(
 
     [PSCredential]$Credential,
 
+    [string]$RunnerDir = 'C:\GitLab-Runner',
+
     [string]$ExportCsv
 )
 
@@ -44,6 +49,11 @@ $ErrorActionPreference = 'Continue'
 
 # ── Remote script block ──────────────────────────────────────
 $probe = {
+    param($RunnerDir)
+
+    $runnerBin   = Join-Path $RunnerDir 'gitlab-runner.exe'
+    $versionFile = Join-Path $RunnerDir '.golden-version'
+
     $result = [ordered]@{
         Hostname      = $env:COMPUTERNAME
         Status        = 'HEALTHY'
@@ -91,16 +101,15 @@ $probe = {
         $svc = Get-Service gitlab-runner -ErrorAction SilentlyContinue
         $result.RunnerStatus = if ($svc) { $svc.Status.ToString() } else { 'NOT FOUND' }
         if ($svc -and $svc.Status -eq 'Running') {
-            $verify = & 'C:\GitLab-Runner\gitlab-runner.exe' verify 2>&1 | Out-String
+            $verify = & $runnerBin verify 2>&1 | Out-String
             $result.RunnerAlive = $verify -match 'is alive'
         }
     } catch {}
 
     # Golden version
-    $vf = 'C:\GitLab-Runner\.golden-version'
-    if (Test-Path $vf) {
+    if (Test-Path $versionFile) {
         try {
-            $ver = Get-Content $vf -Raw | ConvertFrom-Json
+            $ver = Get-Content $versionFile -Raw | ConvertFrom-Json
             $result.ImageVersion = $ver.ImageVersion
         } catch {}
     }
@@ -129,20 +138,15 @@ $probe = {
 # ── Execute across fleet ─────────────────────────────────────
 Write-Output "`n  Querying $($Runners.Count) runner(s)...`n"
 
-$sessionParams = @{
-    ComputerName = $Runners
-    ErrorAction  = 'SilentlyContinue'
-}
-if ($Credential) { $sessionParams.Credential = $Credential }
-
 $results = @()
 
 # Collect results (with timeout handling for unreachable hosts)
 foreach ($runner in $Runners) {
     $invokeParams = @{
-        ComputerName = $runner
-        ScriptBlock  = $probe
-        ErrorAction  = 'SilentlyContinue'
+        ComputerName  = $runner
+        ScriptBlock   = $probe
+        ArgumentList  = @($RunnerDir)
+        ErrorAction   = 'SilentlyContinue'
         ErrorVariable = 'remoteErr'
     }
     if ($Credential) { $invokeParams.Credential = $Credential }

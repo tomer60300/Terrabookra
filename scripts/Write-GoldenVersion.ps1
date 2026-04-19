@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Write a golden image version stamp to C:\GitLab-Runner\.golden-version
+    Write a golden image version stamp to a JSON file.
 
 .DESCRIPTION
     Called at the end of Phase 3 (after validation passes).
@@ -12,14 +12,32 @@
           Get-Content C:\GitLab-Runner\.golden-version | ConvertFrom-Json
       } | Format-Table PSComputerName, ImageVersion, BuildDate, RunnerVersion, DockerVersion
 
+.PARAMETER ImageVersion
+    Golden image version string. Default: 2.3.0
+
+.PARAMETER OutputPath
+    Path to write the version stamp JSON. Default: C:\GitLab-Runner\.golden-version
+
+.PARAMETER RunnerBin
+    Path to gitlab-runner.exe. Default: C:\GitLab-Runner\gitlab-runner.exe
+
+.PARAMETER GitExe
+    Path to git.exe. Default: C:\GitLab-Runner\git\cmd\git.exe
+
+.PARAMETER CertsDir
+    Path to certificates directory. Default: C:\GitLab-Runner\certs
+
 .NOTES
     File: scripts/Write-GoldenVersion.ps1
-    Output: C:\GitLab-Runner\.golden-version (JSON)
+    Output: <OutputPath> (JSON)
 #>
 
 param(
-    [string]$ImageVersion = '2.2.0',
-    [string]$OutputPath   = 'C:\GitLab-Runner\.golden-version'
+    [string]$ImageVersion = '2.3.0',
+    [string]$OutputPath   = 'C:\GitLab-Runner\.golden-version',
+    [string]$RunnerBin    = 'C:\GitLab-Runner\gitlab-runner.exe',
+    [string]$GitExe       = 'C:\GitLab-Runner\git\cmd\git.exe',
+    [string]$CertsDir     = 'C:\GitLab-Runner\certs'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -27,7 +45,7 @@ $ErrorActionPreference = 'Continue'
 # ── Gather component versions ────────────────────────────────
 $runnerVersion = 'unknown'
 try {
-    $out = & 'C:\GitLab-Runner\gitlab-runner.exe' --version 2>&1 | Out-String
+    $out = & $RunnerBin --version 2>&1 | Out-String
     if ($out -match 'Version:\s+([\d.]+)') { $runnerVersion = $Matches[1] }
 } catch {}
 
@@ -38,10 +56,9 @@ try {
 } catch {}
 
 $gitVersion = 'unknown'
-$gitExe = 'C:\GitLab-Runner\git\cmd\git.exe'
-if (Test-Path $gitExe) {
+if (Test-Path $GitExe) {
     try {
-        $gitVersion = & $gitExe --version 2>$null
+        $gitVersion = & $GitExe --version 2>$null
         $gitVersion = $gitVersion -replace 'git version\s*', ''
     } catch {}
 }
@@ -57,9 +74,9 @@ $stamp = [ordered]@{
     RunnerVersion  = $runnerVersion
     DockerVersion  = $dockerVersion
     GitVersion     = $gitVersion
-    ScriptVersion  = '2.2.0'
+    ScriptVersion  = $ImageVersion
     Components     = [ordered]@{
-        Certificates    = (Test-Path 'C:\GitLab-Runner\certs\*.crt')
+        Certificates    = (Test-Path (Join-Path $CertsDir '*.crt'))
         WinRM           = ((Get-Service WinRM -ErrorAction SilentlyContinue).Status -eq 'Running')
         ScheduledTasks  = (Get-ScheduledTask -ErrorAction SilentlyContinue |
                           Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } |

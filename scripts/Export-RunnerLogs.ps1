@@ -24,6 +24,12 @@
 .PARAMETER OutputDir
     Where to write the zip. Default: C:\GitLab-Runner\logs
 
+.PARAMETER RunnerDir
+    Runner base directory. Default: C:\GitLab-Runner
+
+.PARAMETER DaemonJson
+    Path to Docker daemon.json. Default: C:\ProgramData\docker\config\daemon.json
+
 .PARAMETER HoursBack
     How many hours of Event Log to export. Default: 24.
 
@@ -38,9 +44,11 @@
 #>
 
 param(
-    [string]$OutputDir = 'C:\GitLab-Runner\logs',
-    [int]$HoursBack    = 24,
-    [string]$JobId     = ''
+    [string]$OutputDir  = 'C:\GitLab-Runner\logs',
+    [string]$RunnerDir  = 'C:\GitLab-Runner',
+    [string]$DaemonJson = 'C:\ProgramData\docker\config\daemon.json',
+    [int]$HoursBack     = 24,
+    [string]$JobId      = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -50,18 +58,24 @@ $tempDir   = Join-Path $env:TEMP "runner-logs-$timestamp"
 $zipName   = "runner-logs-${hostname}-${timestamp}.zip"
 $zipPath   = Join-Path $OutputDir $zipName
 
+# Derived paths from RunnerDir
+$logsDir    = Join-Path $RunnerDir 'logs'
+$runnerBin  = Join-Path $RunnerDir 'gitlab-runner.exe'
+$configToml = Join-Path $RunnerDir 'config.toml'
+$versionFile = Join-Path $RunnerDir '.golden-version'
+
 # ── Create temp collection directory ─────────────────────────
 New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
 
 # ── 1. Install log ──────────────────────────────────────────
-$installLog = 'C:\GitLab-Runner\logs\install.log'
+$installLog = Join-Path $logsDir 'install.log'
 if (Test-Path $installLog) {
     Copy-Item $installLog (Join-Path $tempDir 'install.log') -Force
 }
 
 # ── 2-4. Daily logs (jobs, network, rdp) ────────────────────
 foreach ($sub in @('jobs', 'network', 'rdp')) {
-    $srcDir = "C:\GitLab-Runner\logs\$sub"
+    $srcDir = Join-Path $logsDir $sub
     if (Test-Path $srcDir) {
         $destSub = Join-Path $tempDir $sub
         New-Item -Path $destSub -ItemType Directory -Force | Out-Null
@@ -81,7 +95,7 @@ $maintFiles = @(
     'volume-prune.log', 'buildcache-prune.log'
 )
 foreach ($f in $maintFiles) {
-    $src = "C:\GitLab-Runner\logs\$f"
+    $src = Join-Path $logsDir $f
     if (Test-Path $src) { Copy-Item $src (Join-Path $maintDir $f) -Force }
 }
 
@@ -94,24 +108,22 @@ try { docker ps -a 2>&1       | Out-File (Join-Path $dockerDir 'docker-ps.txt') 
 try { docker images 2>&1      | Out-File (Join-Path $dockerDir 'docker-images.txt') -Encoding UTF8 } catch {}
 try { docker system df 2>&1   | Out-File (Join-Path $dockerDir 'docker-disk.txt') -Encoding UTF8 } catch {}
 
-$daemonJson = 'C:\ProgramData\docker\config\daemon.json'
-if (Test-Path $daemonJson) { Copy-Item $daemonJson (Join-Path $dockerDir 'daemon.json') -Force }
+if (Test-Path $DaemonJson) { Copy-Item $DaemonJson (Join-Path $dockerDir 'daemon.json') -Force }
 
 # ── 7. Runner diagnostics ───────────────────────────────────
-$runnerDir = Join-Path $tempDir 'runner'
-New-Item -Path $runnerDir -ItemType Directory -Force | Out-Null
+$runnerOutDir = Join-Path $tempDir 'runner'
+New-Item -Path $runnerOutDir -ItemType Directory -Force | Out-Null
 
-$configToml = 'C:\GitLab-Runner\config.toml'
-if (Test-Path $configToml) { Copy-Item $configToml (Join-Path $runnerDir 'config.toml') -Force }
+if (Test-Path $configToml) { Copy-Item $configToml (Join-Path $runnerOutDir 'config.toml') -Force }
 
 try {
-    & 'C:\GitLab-Runner\gitlab-runner.exe' verify 2>&1 |
-        Out-File (Join-Path $runnerDir 'runner-verify.txt') -Encoding UTF8
+    & $runnerBin verify 2>&1 |
+        Out-File (Join-Path $runnerOutDir 'runner-verify.txt') -Encoding UTF8
 } catch {}
 
 $svcStatus = Get-Service gitlab-runner, docker -ErrorAction SilentlyContinue |
     Select-Object Name, Status, StartType | Format-Table -AutoSize | Out-String
-$svcStatus | Out-File (Join-Path $runnerDir 'services.txt') -Encoding UTF8
+$svcStatus | Out-File (Join-Path $runnerOutDir 'services.txt') -Encoding UTF8
 
 # ── 8. Windows Event Log (Application, last N hours) ────────
 $evtDir = Join-Path $tempDir 'eventlog'
@@ -152,7 +164,6 @@ $sysInfo.GetEnumerator() | ForEach-Object { "$($_.Key): $($_.Value)" } |
 $adapters | Out-File (Join-Path $tempDir 'system-info.txt') -Append -Encoding UTF8
 
 # ── 10. Golden image version stamp ───────────────────────────
-$versionFile = 'C:\GitLab-Runner\.golden-version'
 if (Test-Path $versionFile) {
     Copy-Item $versionFile (Join-Path $tempDir 'golden-version.txt') -Force
 }

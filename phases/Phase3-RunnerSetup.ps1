@@ -14,10 +14,11 @@
     3.7   Register runner (skipped if glrt- token) + write config.toml
     3.8   Install runner as Windows service
     3.9   Deploy maintenance scripts from MinIO
-    3.10  Register scheduled tasks
-    3.11  Deploy tools (WinRAR, NSSM, SysInternals, OpenCode)
-    3.12  Final validation (17 checks)
-    3.13  Write golden image version stamp
+    3.10  Deploy monitor-hosts.json for network connectivity script
+    3.11  Register scheduled tasks
+    3.12  Deploy tools (WinRAR, NSSM, SysInternals, OpenCode)
+    3.13  Final validation (17 checks)
+    3.14  Write golden image version stamp
 
 .NOTES
     File: phases/Phase3-RunnerSetup.ps1
@@ -54,8 +55,9 @@ function Invoke-Phase3 {
 
     # ── 3.2 Defender exclusions ──────────────────────────────
     Write-Log '3.2 Defender exclusions'
-    foreach ($p in @('C:\GitLab-Runner', 'C:\ProgramData\docker', 'C:\Program Files\Docker',
-                     $Script:Config.BuildsDir, $Script:Config.CacheDir, $Script:Config.DockerDataRoot)) {
+    foreach ($p in @($Script:Config.RunnerDir, $Script:Config.DockerConfigDir,
+                     $Script:Config.DockerDir, $Script:Config.BuildsDir,
+                     $Script:Config.CacheDir, $Script:Config.DockerDataRoot)) {
         try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue }
         catch { Write-LogWarn "Defender path exclusion failed: $p" }
     }
@@ -122,7 +124,8 @@ function Invoke-Phase3 {
 
     $buildsVol = "$($Script:Config.BuildsDir -replace '\\','\\'):C:\\builds"
     $cacheVol  = "$($Script:Config.CacheDir  -replace '\\','\\'):C:\\cache"
-    $defaultImage = "$($Script:Config.HarborUrl)/golden-image/servercore:ltsc2019"
+    $defaultImage = "$($Script:Config.HarborUrl)/$($Script:Config.HarborProject)/servercore:ltsc2019"
+    $scriptsEsc   = $Script:Config.ScriptsDir -replace '\\', '\\'
 
     # ── 3.7 Register runner (if not already auth token) ──────
     if ($isAuthToken) {
@@ -171,8 +174,8 @@ log_level = "info"
   executor = "docker-windows"
   tls-verify = false
   environment = ["GIT_SSL_NO_VERIFY=true", "DOCKER_TLS_CERTDIR="]
-  pre_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action start"
-  post_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action end"
+  pre_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File ${scriptsEsc}\\Write-JobLog.ps1 -Action start"
+  post_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File ${scriptsEsc}\\Write-JobLog.ps1 -Action end"
 
   [runners.docker]
     image = "$defaultImage"
@@ -238,19 +241,29 @@ $dnsLine
         if (-not (Test-Path $d)) { New-Item -Path $d -ItemType Directory -Force | Out-Null }
     }
 
-    # ── 3.10 Register scheduled tasks ────────────────────────
-    Write-Log '3.10 Register scheduled tasks'
+    # ── 3.10 Deploy monitor-hosts.json ───────────────────────
+    Write-Log '3.10 Deploy monitor-hosts.json from Config.MonitorHosts'
+    $monitorJson = $Script:Config.MonitorHosts | ConvertTo-Json -Depth 2
+    $monitorJsonPath = Join-Path $Script:Config.ScriptsDir 'monitor-hosts.json'
+    $monitorJson | Out-File -FilePath $monitorJsonPath -Encoding UTF8 -Force
+    Write-Log "  Written: $monitorJsonPath"
+
+    # ── 3.11 Register scheduled tasks ────────────────────────
+    Write-Log '3.11 Register scheduled tasks'
     $regScript = Join-Path $Script:Config.ScriptsDir 'Register-ScheduledTasks.ps1'
     if (Test-Path $regScript) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $regScript 2>&1 |
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $regScript `
+            -ScriptsDir $Script:Config.ScriptsDir `
+            -LogsDir $Script:Config.LogsDir `
+            -BuildsDir $Script:Config.BuildsDir 2>&1 |
             ForEach-Object { Write-Log "  tasks: $_" }
     } else {
         Write-LogWarn 'Register-ScheduledTasks.ps1 not found — inline fallback'
         Register-InlineScheduledTask
     }
 
-    # ── 3.11 Deploy tools ────────────────────────────────────
-    Write-Log '3.11 Deploy tools'
+    # ── 3.12 Deploy tools ────────────────────────────────────
+    Write-Log '3.12 Deploy tools'
     $winrarExe = Join-Path $Script:Config.ToolsDir 'winrar-x64-701.exe'
     if (Get-S3Object -Key $Script:Config.S3Keys.WinRarExe -OutFile $winrarExe) {
         Start-Process -FilePath $winrarExe -ArgumentList '/s' -Wait -NoNewWindow -ErrorAction SilentlyContinue
@@ -284,15 +297,19 @@ $dnsLine
 
     Write-Log 'Tools deployed'
 
-    # ── 3.12 Final validation ────────────────────────────────
+    # ── 3.13 Final validation ────────────────────────────────
     Write-Log '========== FINAL VALIDATION =========='
     Invoke-FinalValidation
 
-    # ── 3.13 Write golden image version stamp ───────────────────
-    Write-Log '3.13 Write golden image version stamp'
+    # ── 3.14 Write golden image version stamp ───────────────────
+    Write-Log '3.14 Write golden image version stamp'
     $versionScript = Join-Path $Script:Config.ScriptsDir 'Write-GoldenVersion.ps1'
     if (Test-Path $versionScript) {
-        & $versionScript -ImageVersion $Script:Config.GoldenImageVersion 2>&1 |
+        & $versionScript `
+            -ImageVersion $Script:Config.GoldenImageVersion `
+            -RunnerBin $Script:Config.RunnerBin `
+            -GitExe (Join-Path $Script:Config.GitDir 'cmd\git.exe') `
+            -CertsDir $Script:Config.CertsDir 2>&1 |
             ForEach-Object { Write-Log "  version: $_" }
     } else {
         Write-LogWarn 'Write-GoldenVersion.ps1 not found — skipping version stamp'
@@ -307,19 +324,21 @@ $dnsLine
 
 function Register-InlineScheduledTask {
     $sd = $Script:Config.ScriptsDir
+    $ld = $Script:Config.LogsDir
+    $bd = $Script:Config.BuildsDir
     $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $forever = New-TimeSpan -Days 3650
     $tasks = @(
-        @{ Name='Docker-Image-Prune';          Trigger=(New-ScheduledTaskTrigger -Daily -At '03:00');                                                                         Action="-NoProfile -Command `"docker image prune -a --filter 'until=168h' --force 2>&1 | Out-File C:\GitLab-Runner\logs\image-prune.log -Append`"" },
-        @{ Name='Docker-Container-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 4) -RepetitionDuration $forever);  Action="-NoProfile -Command `"docker container prune --force 2>&1 | Out-File C:\GitLab-Runner\logs\container-prune.log -Append`"" },
+        @{ Name='Docker-Image-Prune';          Trigger=(New-ScheduledTaskTrigger -Daily -At '03:00');                                                                         Action="-NoProfile -Command `"docker image prune -a --filter 'until=168h' --force 2>&1 | Out-File '$ld\image-prune.log' -Append`"" },
+        @{ Name='Docker-Container-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 4) -RepetitionDuration $forever);  Action="-NoProfile -Command `"docker container prune --force 2>&1 | Out-File '$ld\container-prune.log' -Append`"" },
         @{ Name='Docker-Stale-Container-Kill'; Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\kill-stale-containers.ps1`"" },
-        @{ Name='Docker-Volume-Prune';         Trigger=(New-ScheduledTaskTrigger -Daily -At '03:30');                                                                         Action="-NoProfile -Command `"docker volume prune --force 2>&1 | Out-File C:\GitLab-Runner\logs\volume-prune.log -Append`"" },
-        @{ Name='Docker-BuildCache-Prune';     Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '04:00');                                                      Action="-NoProfile -Command `"docker builder prune --all --force 2>&1 | Out-File C:\GitLab-Runner\logs\buildcache-prune.log -Append`"" },
-        @{ Name='Runner-Workspace-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Daily -At '04:00');                                                                         Action="-NoProfile -Command `"Get-ChildItem '$($Script:Config.BuildsDir)' -Directory | Where-Object { `$_.LastWriteTime -lt (Get-Date).AddDays(-3) } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue`"" },
+        @{ Name='Docker-Volume-Prune';         Trigger=(New-ScheduledTaskTrigger -Daily -At '03:30');                                                                         Action="-NoProfile -Command `"docker volume prune --force 2>&1 | Out-File '$ld\volume-prune.log' -Append`"" },
+        @{ Name='Docker-BuildCache-Prune';     Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '04:00');                                                      Action="-NoProfile -Command `"docker builder prune --all --force 2>&1 | Out-File '$ld\buildcache-prune.log' -Append`"" },
+        @{ Name='Runner-Workspace-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Daily -At '04:00');                                                                         Action="-NoProfile -Command `"Get-ChildItem '$bd' -Directory | Where-Object { `$_.LastWriteTime -lt (Get-Date).AddDays(-3) } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue`"" },
         @{ Name='Disk-Space-Monitor';          Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration $forever);Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\disk-monitor.ps1`"" },
         @{ Name='Docker-Daemon-Watchdog';      Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\docker-watchdog.ps1`"" },
         @{ Name='Runner-Service-Watchdog';     Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -Command `"if ((Get-Service gitlab-runner -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service gitlab-runner; Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9004 -EntryType Warning -Message 'Runner restarted.' }`"" },
-        @{ Name='Log-Rotation';                Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00');                                                      Action="-NoProfile -Command `"Get-ChildItem 'C:\GitLab-Runner\logs\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`"" },
+        @{ Name='Log-Rotation';                Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00');                                                      Action="-NoProfile -Command `"Get-ChildItem '$ld\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`"" },
         @{ Name='Network-Connectivity-Monitor';Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Test-NetworkConnectivity.ps1`"" },
         @{ Name='RDP-Audit-Logger';            Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Export-RdpAuditLog.ps1`"" }
     )

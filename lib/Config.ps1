@@ -21,13 +21,27 @@
 $Script:DataDrive = if (Test-Path 'E:\') { 'E:' } else { 'C:' }
 
 # ============================================================
+# BASE URLs — Single source of truth for all hostnames/servers.
+# Edit ONLY these variables; everything else derives from them.
+# ============================================================
+
+$_harborHost       = 'harbor.kayhut.com'
+$_harborProject    = 'golden-image'
+$_gitLabHost       = 'gitlab.kayhut.com'
+$_gitLabRegistry   = "${_gitLabHost}:5050"
+$_minioHost        = 'kayhut-minio.com'
+$_minioPort        = 9000
+$_artifactoryHost  = 'artifactory-prod'
+$_be1Host          = 'be1.kayhut.com'
+
+# ============================================================
 # CONFIGURATION
 # ============================================================
 
 $Script:Config = @{
 
     # --- MinIO S3 ---
-    MinioEndpoint    = 'https://kayhut-minio.com:9000'
+    MinioEndpoint    = "https://${_minioHost}:${_minioPort}"
     MinioBucket      = 'gitlab-runner-golden'
     MinioAccessKey   = 'YOUR_ACCESS_KEY_HERE'
     MinioSecretKey   = 'YOUR_SECRET_KEY_HERE'
@@ -42,12 +56,18 @@ $Script:Config = @{
     #   PAT / legacy registration token
     #                Script will call `gitlab-runner register --registration-token`
     #                and extract the resulting auth token.
-    GitLabUrl        = 'https://gitlab.kayhut.com'
+    GitLabUrl        = "https://${_gitLabHost}"
 
     # --- Harbor ---
-    HarborUrl        = 'harbor.kayhut.com'
+    HarborUrl        = $_harborHost
+    HarborProject    = $_harborProject
     HarborUser       = ''
     HarborPass       = ''
+
+    # --- Hosts (for InsecureRegistries + MonitorHosts) ---
+    GitLabRegistry   = $_gitLabRegistry
+    ArtifactoryHost  = $_artifactoryHost
+    Be1Host          = $_be1Host
 
     # --- Paths (C: drive — OS, binaries, tools) ---
     RunnerDir        = 'C:\GitLab-Runner'
@@ -98,21 +118,6 @@ $Script:Config = @{
         RegTasks     = 'scripts/Register-ScheduledTasks.ps1'
     }
 
-    # --- Pre-pull images ---
-    PrePullImages = @(
-        'harbor.kayhut.com/golden-image/gitlab-runner-helper:x86_64-v16.7.0-servercore1809',
-        'harbor.kayhut.com/golden-image/servercore:ltsc2019',
-        'harbor.kayhut.com/golden-image/windows:ltsc2019'
-    )
-
-    HelperImage = 'harbor.kayhut.com/golden-image/gitlab-runner-helper:x86_64-v16.7.0-servercore1809'
-
-    InsecureRegistries = @(
-        'harbor.kayhut.com',
-        'gitlab.kayhut.com:5050',
-        'artifactory-prod'
-    )
-
     # --- Certificates ---
     CertsDir         = 'C:\GitLab-Runner\certs'
 
@@ -123,13 +128,6 @@ $Script:Config = @{
     # --- Network monitor ---
     NetLogDir        = 'C:\GitLab-Runner\logs\network'
     NetLogMaxDays    = 30
-    MonitorHosts     = @(
-        @{ Host = 'gitlab.kayhut.com';  Port = 443  },
-        @{ Host = 'harbor.kayhut.com';  Port = 443  },
-        @{ Host = 'kayhut-minio.com';   Port = 9000 },
-        @{ Host = 'artifactory-prod';   Port = 443  },
-        @{ Host = 'be1.kayhut.com';     Port = 443  }
-    )
 
     # --- RDP audit ---
     RdpLogDir        = 'C:\GitLab-Runner\logs\rdp'
@@ -154,7 +152,7 @@ $Script:Config = @{
     }
 
     # --- Golden image version ---
-    GoldenImageVersion = '2.2.0'
+    GoldenImageVersion = '2.3.0'
 
     # --- Services to disable ---
     DisableServices = @(
@@ -164,3 +162,29 @@ $Script:Config = @{
         'XboxNetApiSvc', 'TabletInputService'
     )
 }
+
+# ============================================================
+# DERIVED VALUES — Built from base URLs (do NOT hardcode hosts below)
+# ============================================================
+
+$Script:Config.PrePullImages = @(
+    "${_harborHost}/${_harborProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809",
+    "${_harborHost}/${_harborProject}/servercore:ltsc2019",
+    "${_harborHost}/${_harborProject}/windows:ltsc2019"
+)
+
+$Script:Config.HelperImage = "${_harborHost}/${_harborProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809"
+
+$Script:Config.InsecureRegistries = @(
+    $_harborHost,
+    $_gitLabRegistry,
+    $_artifactoryHost
+)
+
+$Script:Config.MonitorHosts = @(
+    @{ Host = $_gitLabHost;       Port = 443          },
+    @{ Host = $_harborHost;       Port = 443          },
+    @{ Host = $_minioHost;        Port = $_minioPort   },
+    @{ Host = $_artifactoryHost;  Port = 443          },
+    @{ Host = $_be1Host;          Port = 443          }
+)

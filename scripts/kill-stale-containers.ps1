@@ -7,15 +7,25 @@
     Parses `docker ps` output to detect containers running longer than
     the threshold and force-kills them.
 
+.PARAMETER MaxAgeHours
+    Hours before a running container is considered stale. Default: 4
+
+.PARAMETER LogFile
+    Path to the stale containers log file. Default: C:\GitLab-Runner\logs\stale-containers.log
+
 .NOTES
-    Log: C:\GitLab-Runner\logs\stale-containers.log
+    Event IDs:
+      9012 — Stale containers killed
 #>
 
-$ErrorActionPreference = 'Continue'
-$maxAgeHours = 4
-$logFile     = 'C:\GitLab-Runner\logs\stale-containers.log'
+param(
+    [int]$MaxAgeHours = 4,
+    [string]$LogFile  = 'C:\GitLab-Runner\logs\stale-containers.log'
+)
 
-$logDir = Split-Path $logFile -Parent
+$ErrorActionPreference = 'Continue'
+
+$logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
 # ── Find and kill stale containers ───────────────────────────
@@ -27,16 +37,16 @@ foreach ($line in $containers) {
         $id    = $Matches[1]
         $hours = [int]$Matches[2]
 
-        if ($hours -ge $maxAgeHours) {
+        if ($hours -ge $MaxAgeHours) {
             docker kill $id 2>&1 | Out-Null
             $killed++
             "$(Get-Date -Format o) Killed container $id (running ${hours}h)" |
-                Out-File $logFile -Append -Encoding UTF8
+                Out-File $LogFile -Append -Encoding UTF8
         }
     }
 }
 
 if ($killed -gt 0) {
     Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9012 -EntryType Warning `
-        -Message "Killed $killed stale container(s) running longer than ${maxAgeHours} hours."
+        -Message "Killed $killed stale container(s) running longer than ${MaxAgeHours} hours."
 }

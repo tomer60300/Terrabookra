@@ -8,19 +8,23 @@
       < 10 GB  → CRITICAL: full docker system prune --all
       < 20 GB  → WARNING:  event log only (no auto action)
 
+.PARAMETER LogFile
+    Path to the disk monitor log file. Default: C:\GitLab-Runner\logs\disk-monitor.log
+
 .NOTES
     Event IDs:
       9001 — Critical disk space, emergency prune executed
       9002 — Low disk space warning
-
-    Log: C:\GitLab-Runner\logs\disk-monitor.log
 #>
 
-$ErrorActionPreference = 'Continue'
-$source  = 'GitLabRunner'
-$logFile = 'C:\GitLab-Runner\logs\disk-monitor.log'
+param(
+    [string]$LogFile = 'C:\GitLab-Runner\logs\disk-monitor.log'
+)
 
-$logDir = Split-Path $logFile -Parent
+$ErrorActionPreference = 'Continue'
+$source = 'GitLabRunner'
+
+$logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
 # ── Check disk space ─────────────────────────────────────────
@@ -35,16 +39,16 @@ if ($freeGB -lt 10) {
         -Message "CRITICAL: Disk was ${freeGB} GB. Emergency prune executed. Now ${freeAfter} GB free."
 
     "$(Get-Date -Format o) CRITICAL DiskFree=${freeGB}GB -> pruned -> ${freeAfter}GB" |
-        Out-File $logFile -Append -Encoding UTF8
+        Out-File $LogFile -Append -Encoding UTF8
 }
 elseif ($freeGB -lt 20) {
     Write-EventLog -LogName Application -Source $source -EventId 9002 -EntryType Warning `
         -Message "WARNING: Disk space is ${freeGB} GB. Consider manual cleanup."
 
     "$(Get-Date -Format o) WARNING DiskFree=${freeGB}GB" |
-        Out-File $logFile -Append -Encoding UTF8
+        Out-File $LogFile -Append -Encoding UTF8
 }
 else {
     "$(Get-Date -Format o) OK DiskFree=${freeGB}GB" |
-        Out-File $logFile -Append -Encoding UTF8
+        Out-File $LogFile -Append -Encoding UTF8
 }

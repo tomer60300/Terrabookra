@@ -7,19 +7,23 @@
     If `docker info` fails, restarts the Docker service and then the
     GitLab Runner service (which loses its connection when Docker drops).
 
+.PARAMETER LogFile
+    Path to the watchdog log file. Default: C:\GitLab-Runner\logs\docker-watchdog.log
+
 .NOTES
     Event IDs:
       9003 — Docker daemon restarted
       9009 — Docker restart failed
-
-    Log: C:\GitLab-Runner\logs\docker-watchdog.log
 #>
 
-$ErrorActionPreference = 'Continue'
-$source  = 'GitLabRunner'
-$logFile = 'C:\GitLab-Runner\logs\docker-watchdog.log'
+param(
+    [string]$LogFile = 'C:\GitLab-Runner\logs\docker-watchdog.log'
+)
 
-$logDir = Split-Path $logFile -Parent
+$ErrorActionPreference = 'Continue'
+$source = 'GitLabRunner'
+
+$logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
 # ── Check Docker ─────────────────────────────────────────────
@@ -45,7 +49,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-EventLog -LogName Application -Source $source -EventId 9009 -EntryType Error `
         -Message 'Docker restart FAILED — daemon still unresponsive after restart.'
     "$(Get-Date -Format o) Docker restart FAILED" |
-        Out-File $logFile -Append -Encoding UTF8
+        Out-File $LogFile -Append -Encoding UTF8
     return
 }
 
@@ -53,4 +57,4 @@ if ($LASTEXITCODE -ne 0) {
 Restart-Service gitlab-runner -Force -ErrorAction SilentlyContinue
 
 "$(Get-Date -Format o) Docker daemon restarted successfully. Runner restarted." |
-    Out-File $logFile -Append -Encoding UTF8
+    Out-File $LogFile -Append -Encoding UTF8

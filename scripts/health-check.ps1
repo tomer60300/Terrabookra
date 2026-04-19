@@ -7,19 +7,23 @@
     Writes status line to health-check.log and fires Windows Event Log entries
     for any degraded component so the watchdog scripts can react.
 
+.PARAMETER LogFile
+    Path to the health check log file. Default: C:\GitLab-Runner\logs\health-check.log
+
 .NOTES
     Event IDs:
       9005 — Docker daemon unresponsive
       9006 — GitLab Runner service not running
       9007 — Low disk space (< 20 GB)
       9008 — Stale containers detected (> 4 h)
-
-    Log: C:\GitLab-Runner\logs\health-check.log
 #>
 
+param(
+    [string]$LogFile = 'C:\GitLab-Runner\logs\health-check.log'
+)
+
 $ErrorActionPreference = 'Continue'
-$source  = 'GitLabRunner'
-$logFile = 'C:\GitLab-Runner\logs\health-check.log'
+$source = 'GitLabRunner'
 
 # ── Docker daemon ────────────────────────────────────────────
 $dockerOk = $false
@@ -73,8 +77,8 @@ $status = if ($dockerOk -and $runnerOk -and $freeGB -ge 20 -and $staleCount -eq 
     'DEGRADED'
 }
 
-$logDir = Split-Path $logFile -Parent
+$logDir = Split-Path $LogFile -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
 "$(Get-Date -Format o) [$status] Docker=$dockerOk Runner=$runnerOk DiskFree=${freeGB}GB StaleContainers=$staleCount" |
-    Out-File $logFile -Append -Encoding UTF8
+    Out-File $LogFile -Append -Encoding UTF8

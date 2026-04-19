@@ -6,6 +6,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.3.0] — 2026-04-19
+
+### Changed — No hardcoded URLs/hostnames outside Config
+
+1. **Config.ps1 — DRY refactor** — All hostnames/URLs extracted into base variables
+   at the top of the file. `PrePullImages`, `HelperImage`, `InsecureRegistries`,
+   and `MonitorHosts` are now derived from base variables — change a hostname once,
+   it propagates everywhere.
+   - New base variables: `$_harborHost`, `$_gitLabHost`, `$_minioHost`, `$_artifactoryHost`, `$_be1Host`
+   - New config keys: `HarborProject`, `GitLabRegistry`, `ArtifactoryHost`, `Be1Host`
+   - Derived values built after the hashtable (single source of truth)
+
+2. **Test-NetworkConnectivity.ps1** — No longer has hardcoded host list.
+   Reads from `monitor-hosts.json` (deployed by Phase 3 from `Config.MonitorHosts`).
+   Falls back to `-Hosts` parameter.
+
+3. **Register-ScheduledTasks.ps1** — Paths now parameterized (`-ScriptsDir`,
+   `-LogsDir`, `-BuildsDir`). Phase 3 passes Config values.
+
+4. **Phase3-RunnerSetup.ps1** — All hardcoded paths replaced with Config keys:
+   - Defender exclusions use `$Config.RunnerDir`, `$Config.DockerDir`, etc.
+   - config.toml `pre_build_script`/`post_build_script` use `$Config.ScriptsDir`
+   - Inline fallback tasks use `$Config.LogsDir`, `$Config.BuildsDir`
+   - New step 3.10: deploys `monitor-hosts.json` from `Config.MonitorHosts`
+   - Steps renumbered: 3.10→3.14 (was 3.10→3.13)
+
+5. **Standalone scripts parameterized** — All maintenance scripts accept
+   key paths as parameters with sensible defaults:
+   - `health-check.ps1` — `-LogFile`
+   - `disk-monitor.ps1` — `-LogFile`
+   - `docker-watchdog.ps1` — `-LogFile`
+   - `kill-stale-containers.ps1` — `-MaxAgeHours`, `-LogFile`
+   - `Write-GoldenVersion.ps1` — `-RunnerBin`, `-GitExe`, `-CertsDir`
+   - `Export-RunnerLogs.ps1` — `-RunnerDir`, `-DaemonJson`
+   - `Get-FleetHealth.ps1` — `-RunnerDir` (passed to remote scriptblock)
+
+6. **Golden image version** bumped to `2.3.0`
+
+---
+
 ## [2.2.1] — 2026-04-19
 
 ### Fixed — 4 audit issues
