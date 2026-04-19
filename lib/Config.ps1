@@ -149,6 +149,7 @@ $Script:Config = @{
         GoldenVersion  = 'scripts/Write-GoldenVersion.ps1'
         OpenCodeExe    = 'tools/opencode/opencode-desktop-windows-x64-setup.exe'
         OpenCodeConfig = 'tools/opencode/opencode.jsonc'
+        DepValidator   = 'validation/Test-Dependencies.ps1'
     }
 
     # --- Golden image version ---

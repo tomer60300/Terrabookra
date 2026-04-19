@@ -6,6 +6,7 @@
     Called by Install-GitLabRunner.ps1 when no phase markers exist.
     Prepares the VM for Docker and Runner installation:
 
+    1.0  Pre-flight dependency validation (DNS, S3, Harbor)
     1.1  Register Event Log source
     1.2  Disable unnecessary Windows services (17 services)
     1.3  Set High Performance power plan
@@ -25,6 +26,29 @@
 
 function Invoke-Phase1 {
     Write-Log '========== PHASE 1: System Preparation =========='
+
+    # ── 1.0 Pre-flight dependency validation ─────────────────
+    Write-Log '1.0 Pre-flight dependency validation (DNS + S3 + Harbor)'
+    $depScript = Join-Path $PSScriptRoot '..\validation\Test-Dependencies.ps1'
+    if (-not (Test-Path $depScript)) {
+        # Fallback: try to fetch from S3
+        $depScriptLocal = Join-Path $Script:Config.ScriptsDir 'Test-Dependencies.ps1'
+        if (-not (Test-Path $depScriptLocal)) {
+            Get-S3Object -Key $Script:Config.S3KeysExtra.DepValidator -OutFile $depScriptLocal | Out-Null
+        }
+        $depScript = $depScriptLocal
+    }
+    if (Test-Path $depScript) {
+        $depResult = & $depScript 2>&1
+        $depResult | ForEach-Object { Write-Log "  dep: $_" }
+        # Extract summary — last object is the PSCustomObject
+        $summary = $depResult | Where-Object { $_ -is [PSCustomObject] -and $_.Failed -ne $null } | Select-Object -Last 1
+        if ($summary -and $summary.Failed -gt 0) {
+            Write-LogWarn "Dependency check: $($summary.Failed) of $($summary.Total) failed — install may fail later"
+        }
+    } else {
+        Write-LogWarn 'Test-Dependencies.ps1 not found — skipping pre-flight check'
+    }
 
     # ── 1.1 Event Log source ─────────────────────────────────
     Write-Log '1.1 Register Event Log source'
@@ -75,7 +99,7 @@ function Invoke-Phase1 {
     [System.Environment]::SetEnvironmentVariable('DOTNET_CLI_TELEMETRY_OPTOUT', '1', 'Machine')
     [System.Environment]::SetEnvironmentVariable('DOTNET_NOLOGO', '1', 'Machine')
     $currentPath = [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
-    foreach ($p in @('C:\Program Files\Docker', 'C:\GitLab-Runner\git\cmd', 'C:\Tools', 'C:\GitLab-Runner')) {
+    foreach ($p in @($Script:Config.DockerDir, (Join-Path $Script:Config.GitDir 'cmd'), $Script:Config.ToolsDir, $Script:Config.RunnerDir)) {
         if ($currentPath -notlike "*$p*") { $currentPath = "$currentPath;$p" }
     }
     [System.Environment]::SetEnvironmentVariable('PATH', $currentPath, 'Machine')

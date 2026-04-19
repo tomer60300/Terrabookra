@@ -44,6 +44,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 6. **Golden image version** bumped to `2.3.0`
 
+7. **New: `validation/Test-Dependencies.ps1`** — Pre-flight dependency validator
+   - Resolves all hostnames from `Config.MonitorHosts` via DNS
+   - HEAD request (AWS SigV4) on all 26 MinIO S3 objects — no download
+   - Registry API v2 manifest HEAD for all 3 Harbor pre-pull images — no pull
+   - Runs standalone or integrated from Phase 1 step 1.0
+   - Color-coded output with PASS/FAIL per check, summary with failed items
+   - Event Log entries: 9020 (all pass) / 9021 (failures)
+   - New S3 key: `S3KeysExtra.DepValidator`
+
+8. **Phase 1** — New step 1.0 runs dependency validation as pre-flight check.
+   PATH additions now use Config keys instead of hardcoded paths.
+
+9. **Invoke-FinalValidation.ps1** — Defender exclusion check uses `$Config.RunnerDir`
+
 ---
 
 ## [2.2.1] — 2026-04-19

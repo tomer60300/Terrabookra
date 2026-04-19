@@ -59,7 +59,7 @@ function Invoke-FinalValidation {
     Check 'Runner verify (is alive)'    { (& $Script:Config.RunnerBin verify 2>&1 | Out-String) -match 'is alive' }
     Check 'Git available'               { Test-Path (Join-Path $Script:Config.GitDir 'cmd\git.exe') }
     Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
-    Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains 'C:\GitLab-Runner' }
+    Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }
     Check 'Helper image present'        { (docker images $Script:Config.HelperImage --format '{{.Tag}}' 2>$null) -match 'v16.7.0' }
     Check 'Scheduled tasks (>=8)'       { (Get-ScheduledTask | Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log)-' } | Measure-Object).Count -ge 8 }
     Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
