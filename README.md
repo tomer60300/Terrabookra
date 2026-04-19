@@ -2,7 +2,7 @@
 
 Automated provisioning of GitLab Runner VMs for an air-gapped Windows Server 2019 environment.
 
-A single orchestrator script (`Install-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a freshly provisioned VM and dispatches modular phases that produce a fully operational GitLab Runner — registered, polling for jobs, with Docker, maintenance tasks, and monitoring — all with zero manual intervention.
+A single orchestrator script (`Bootstrap-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a freshly provisioned VM and dispatches modular phases that produce a fully operational GitLab Runner — registered, polling for jobs, with Docker, maintenance tasks, and monitoring — all with zero manual intervention.
 
 ---
 
@@ -24,7 +24,7 @@ A single orchestrator script (`Install-GitLabRunner.ps1`) is executed by VMware 
 
 ```
 Terrabookra/
-├── Install-GitLabRunner.ps1              # Orchestrator: load modules, detect phase, dispatch
+├── Bootstrap-GitLabRunner.ps1              # Orchestrator: load modules, detect phase, dispatch
 │
 ├── lib/                                  # Shared libraries (dot-sourced by orchestrator)
 │   ├── Config.ps1                        # All settings, paths, S3 keys, constants
@@ -60,11 +60,11 @@ Terrabookra/
 
 ## Modular Design
 
-The project follows a **manager/worker pattern**. The orchestrator (`Install-GitLabRunner.ps1`) is compact — it loads libraries and dispatches to the correct phase. Each module has a single responsibility:
+The project follows a **manager/worker pattern**. The orchestrator (`Bootstrap-GitLabRunner.ps1`) is compact — it loads libraries and dispatches to the correct phase. Each module has a single responsibility:
 
 | File | Responsibility | Lines |
 |------|---------------|-------|
-| `Install-GitLabRunner.ps1` | Load modules, detect phase, dispatch | ~80 |
+| `Bootstrap-GitLabRunner.ps1` | Load modules, detect phase, dispatch | ~80 |
 | `lib/Config.ps1` | All configuration in one place | ~100 |
 | `lib/Common.ps1` | Shared helpers (S3, logging, TLS, etc.) | ~200 |
 | `phases/Phase1-SystemPrep.ps1` | System preparation | ~100 |
@@ -81,7 +81,7 @@ The project follows a **manager/worker pattern**. The orchestrator (`Install-Git
 The orchestrator is re-run from the top after each Be1 reboot. Marker files determine where to resume:
 
 ```
-Be1 runs Install-GitLabRunner.ps1
+Be1 runs Bootstrap-GitLabRunner.ps1
     │
     ├─ dot-source lib/Config.ps1        (settings)
     ├─ dot-source lib/Common.ps1        (helpers)

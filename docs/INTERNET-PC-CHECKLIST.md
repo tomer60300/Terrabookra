@@ -83,7 +83,7 @@ USB/
 │   ├── windows-ltsc2019.tar
 │   └── helper-v16.7.0.tar
 └── scripts/
-    ├── Install-GitLabRunner.ps1
+    ├── Bootstrap-GitLabRunner.ps1
     ├── health-check.ps1
     ├── docker-watchdog.ps1
     ├── disk-monitor.ps1

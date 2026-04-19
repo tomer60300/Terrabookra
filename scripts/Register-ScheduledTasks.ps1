@@ -3,7 +3,7 @@
     Register all maintenance scheduled tasks for the GitLab Runner golden image.
 
 .DESCRIPTION
-    Run once during Phase 3 of Install-GitLabRunner.ps1.
+    Run once during Phase 3 of Bootstrap-GitLabRunner.ps1.
     Creates 12 scheduled tasks under SYSTEM for Docker cleanup, disk monitoring,
     service watchdogs, log rotation, network monitoring, and RDP audit.
 

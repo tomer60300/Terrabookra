@@ -1,6 +1,6 @@
 # lib/
 
-Shared libraries dot-sourced by `Install-GitLabRunner.ps1` before any phase runs.
+Shared libraries dot-sourced by `Bootstrap-GitLabRunner.ps1` before any phase runs.
 
 | File | Purpose |
 |------|---------|

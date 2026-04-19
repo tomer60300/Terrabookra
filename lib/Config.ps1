@@ -3,7 +3,7 @@
     Configuration -- all settings, paths, and constants for the GitLab Runner golden image.
 
 .DESCRIPTION
-    Dot-sourced by Install-GitLabRunner.ps1 before anything else runs.
+    Dot-sourced by Bootstrap-GitLabRunner.ps1 after Phase 0 downloads it from MinIO.
     Defines $Script:Config (hashtable) and resolves the data drive (E: preferred, C: fallback).
 
     Edit the values below to match your environment. Credentials are placeholders --
@@ -11,7 +11,7 @@
 
 .NOTES
     File: lib/Config.ps1
-    Used by: Install-GitLabRunner.ps1 (orchestrator)
+    Used by: Bootstrap-GitLabRunner.ps1 (orchestrator)
 #>
 
 # ============================================================
@@ -137,6 +137,16 @@ $Script:Config = @{
     S3Certs = @(
         'certs/kayhut-ca.crt'
     )
+
+    # --- Bootstrap S3 keys (downloaded by Phase 0 in Bootstrap-GitLabRunner.ps1) ---
+    S3Bootstrap = @{
+        Config         = 'bootstrap/lib/Config.ps1'
+        Common         = 'bootstrap/lib/Common.ps1'
+        Phase1         = 'bootstrap/phases/Phase1-SystemPrep.ps1'
+        Phase2         = 'bootstrap/phases/Phase2-DockerInstall.ps1'
+        Phase3         = 'bootstrap/phases/Phase3-RunnerSetup.ps1'
+        FinalValid     = 'bootstrap/validation/Invoke-FinalValidation.ps1'
+    }
 
     # --- MinIO object keys (new scripts) ---
     S3KeysExtra = @{

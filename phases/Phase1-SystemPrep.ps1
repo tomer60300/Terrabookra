@@ -3,7 +3,7 @@
     Phase 1 -- System preparation, services, environment, Windows features.
 
 .DESCRIPTION
-    Called by Install-GitLabRunner.ps1 when no phase markers exist.
+    Called by Bootstrap-GitLabRunner.ps1 when no phase markers exist.
     Prepares the VM for Docker and Runner installation:
 
     1.0  Pre-flight dependency validation (DNS, S3, Harbor)

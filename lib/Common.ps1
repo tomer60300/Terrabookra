@@ -3,12 +3,12 @@
     Common helpers -- TLS bypass, logging, S3 download, PE validation, phase markers, reboot.
 
 .DESCRIPTION
-    Dot-sourced by Install-GitLabRunner.ps1 after Config.ps1.
+    Dot-sourced by Bootstrap-GitLabRunner.ps1 after Config.ps1.
     Provides all shared functions used across phases.
 
 .NOTES
     File: lib/Common.ps1
-    Used by: Install-GitLabRunner.ps1, phases/*.ps1, validation/*.ps1
+    Used by: Bootstrap-GitLabRunner.ps1, phases/*.ps1, validation/*.ps1
 
     Functions exported:
       Write-Log, Write-LogError, Write-LogWarn

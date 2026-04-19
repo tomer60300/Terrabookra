@@ -11,7 +11,7 @@ Be1 (VMware Aria) provisions VM
   Domain join + DNS config (handled by Be1/Bukra)
         │
         ▼
-  Install-GitLabRunner.ps1 (orchestrator)
+  Bootstrap-GitLabRunner.ps1 (orchestrator)
         │
         ├── dot-source lib/Config.ps1
         ├── dot-source lib/Common.ps1
@@ -31,7 +31,7 @@ Be1 (VMware Aria) provisions VM
 ## Module Dependency Map
 
 ```
-Install-GitLabRunner.ps1 (orchestrator)
+Bootstrap-GitLabRunner.ps1 (orchestrator)
     │
     ├── lib/Config.ps1          ← loaded first (no dependencies)
     ├── lib/Common.ps1          ← depends on Config.ps1 ($Script:Config)

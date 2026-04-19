@@ -1,7 +1,7 @@
 # Migration from Monolith — What Changed
 
 This document describes every structural and functional difference between the original
-single-file `Install-GitLabRunner.ps1` (822 lines) and the current modular project (1917 lines across 17 `.ps1` files).
+single-file `Bootstrap-GitLabRunner.ps1` (822 lines) and the current modular project (1917 lines across 17 `.ps1` files).
 
 ---
 
@@ -10,7 +10,7 @@ single-file `Install-GitLabRunner.ps1` (822 lines) and the current modular proje
 ### Before (v1 — single file)
 
 ```
-Install-GitLabRunner.ps1    ← 822 lines, everything in one file
+Bootstrap-GitLabRunner.ps1    ← 822 lines, everything in one file
 scripts/
   health-check.ps1          ← already existed (deployed from S3)
   disk-monitor.ps1
@@ -26,7 +26,7 @@ inline scheduled task fallback, and the 17-check validation suite.
 ### After (v2.1.1 — modular)
 
 ```
-Install-GitLabRunner.ps1              ← 92 lines — orchestrator only
+Bootstrap-GitLabRunner.ps1              ← 92 lines — orchestrator only
 lib/
   Config.ps1                          ← 154 lines — all settings and S3 keys
   Common.ps1                          ← 280 lines — TLS, logging, S3, helpers
@@ -69,7 +69,7 @@ The code is identical — only the file boundary changed.
 | `Invoke-Phase2` function (lines 457–522) | `phases/Phase2-DockerInstall.ps1` | 97 |
 | `Invoke-Phase3` + `Register-InlineScheduledTask` (lines 528–748) | `phases/Phase3-RunnerSetup.ps1` | 273 |
 | `Invoke-FinalValidation` (lines 754–792) | `validation/Invoke-FinalValidation.ps1` | 79 |
-| Main dispatcher (lines 798–822) | `Install-GitLabRunner.ps1` (orchestrator) | 92 |
+| Main dispatcher (lines 798–822) | `Bootstrap-GitLabRunner.ps1` (orchestrator) | 92 |
 
 The orchestrator now does three things: resolve `$PSScriptRoot`, dot-source
 all modules, and dispatch to the right phase based on marker files.
@@ -299,7 +299,7 @@ Total: 10 → 12
 ## Dot-Source Chain (How Modules Load)
 
 ```
-Install-GitLabRunner.ps1
+Bootstrap-GitLabRunner.ps1
   ├── . lib\Config.ps1           → defines $Script:Config
   ├── . lib\Common.ps1           → TLS, Write-Log, Get-S3Object, helpers
   ├── . phases\Phase1-SystemPrep.ps1   → Invoke-Phase1

@@ -255,7 +255,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [2.0.0] -- 2026-04-16
 
 ### Changed
-- **BREAKING: Modular refactor** -- `Install-GitLabRunner.ps1` is now a slim orchestrator (~80 lines)
+- **BREAKING: Modular refactor** -- `Bootstrap-GitLabRunner.ps1` is now a slim orchestrator (~80 lines)
   that dot-sources focused modules instead of containing all logic in one 823-line file
 - Split into manager/worker pattern:
   - `lib/Config.ps1` -- all configuration in one place
@@ -285,7 +285,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Added
 - Initial repository setup with full project structure
-- `Install-GitLabRunner.ps1` -- three-phase post-install script for Be1 (VMware Aria)
+- `Bootstrap-GitLabRunner.ps1` -- three-phase post-install script for Be1 (VMware Aria)
   - Phase 1: System prep, services, env vars, Windows features (Containers + Hyper-V)
   - Phase 2: Docker 25.0.15 raw binary install, `daemon.json`, `dockerd` service registration
   - Phase 3: Runner install, registration, config.toml, image pre-pull, maintenance, 17-check validation
