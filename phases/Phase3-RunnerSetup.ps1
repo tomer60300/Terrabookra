@@ -243,7 +243,7 @@ $dnsLine
 
     # ── 3.10 Deploy monitor-hosts.json ───────────────────────
     Write-Log '3.10 Deploy monitor-hosts.json from Config.MonitorHosts'
-    $monitorJson = $Script:Config.MonitorHosts | ConvertTo-Json -Depth 2
+    $monitorJson = ConvertTo-Json -InputObject @($Script:Config.MonitorHosts) -Depth 2
     $monitorJsonPath = Join-Path $Script:Config.ScriptsDir 'monitor-hosts.json'
     $monitorJson | Out-File -FilePath $monitorJsonPath -Encoding UTF8 -Force
     Write-Log "  Written: $monitorJsonPath"
@@ -307,6 +307,7 @@ $dnsLine
     if (Test-Path $versionScript) {
         & $versionScript `
             -ImageVersion $Script:Config.GoldenImageVersion `
+            -OutputPath (Join-Path $Script:Config.RunnerDir '.golden-version') `
             -RunnerBin $Script:Config.RunnerBin `
             -GitExe (Join-Path $Script:Config.GitDir 'cmd\git.exe') `
             -CertsDir $Script:Config.CertsDir 2>&1 |

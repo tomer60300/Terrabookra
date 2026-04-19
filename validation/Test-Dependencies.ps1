@@ -423,12 +423,12 @@ $summary = [PSCustomObject]@{
 # Write to Event Log if running during install
 try {
     if ($failCount -eq 0) {
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9020 -EntryType Information `
+        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9030 -EntryType Information `
             -Message "Dependency validation: ALL $total checks passed."
     } else {
         $failedList = ($results | Where-Object { $_.Status -eq 'FAIL' } |
             ForEach-Object { "$($_.Category): $($_.Target)" }) -join "`n"
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9021 -EntryType Warning `
+        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9031 -EntryType Warning `
             -Message "Dependency validation: $failCount of $total checks FAILED.`n$failedList"
     }
 } catch {

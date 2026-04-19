@@ -9,11 +9,17 @@
 
     Also captures logoff events (4634, 4647) for session duration tracking.
 
-    History auto-rotated: files older than 30 days are deleted.
+    History auto-rotated: files older than MaxAgeDays are deleted.
+
+.PARAMETER LogDir
+    Directory for daily RDP log files. Default: C:\GitLab-Runner\logs\rdp
+
+.PARAMETER MaxAgeDays
+    Days to keep old log files. Default: 30
 
 .NOTES
     File: scripts/Export-RdpAuditLog.ps1
-    Log: C:\GitLab-Runner\logs\rdp\rdp-YYYY-MM-DD.log
+    Log: <LogDir>\rdp-YYYY-MM-DD.log
 
     Prerequisites:
       Audit Logon must be enabled:
@@ -27,12 +33,15 @@
       23 (TerminalServices-LocalSessionManager) — RDP session logoff
 #>
 
-$ErrorActionPreference = 'Continue'
-$logDir     = 'C:\GitLab-Runner\logs\rdp'
-$maxAgeDays = 30
-$markerFile = Join-Path $logDir '.last-check'
+param(
+    [string]$LogDir     = 'C:\GitLab-Runner\logs\rdp',
+    [int]$MaxAgeDays    = 30
+)
 
-if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+$ErrorActionPreference = 'Continue'
+$markerFile = Join-Path $LogDir '.last-check'
+
+if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 
 # ── Determine time window (since last check) ─────────────────
 $since = (Get-Date).AddMinutes(-6)  # default: last 6 min (5 min interval + buffer)
@@ -42,7 +51,7 @@ if (Test-Path $markerFile) {
 }
 
 $today   = Get-Date -Format 'yyyy-MM-dd'
-$logFile = Join-Path $logDir "rdp-$today.log"
+$logFile = Join-Path $LogDir "rdp-$today.log"
 
 # ── TerminalServices events (most reliable for RDP) ──────────
 $tsEvents = @()
@@ -102,6 +111,6 @@ foreach ($evt in $secEvents) {
 Get-Date -Format 'o' | Out-File $markerFile -Force -Encoding UTF8
 
 # ── Rotate old logs ──────────────────────────────────────────
-Get-ChildItem $logDir -Filter 'rdp-*.log' | Where-Object {
-    $_.LastWriteTime -lt (Get-Date).AddDays(-$maxAgeDays)
+Get-ChildItem $LogDir -Filter 'rdp-*.log' | Where-Object {
+    $_.LastWriteTime -lt (Get-Date).AddDays(-$MaxAgeDays)
 } | Remove-Item -Force -ErrorAction SilentlyContinue

@@ -7,7 +7,7 @@
     post_build_script (action=end).
 
     Writes a structured log line for each job event to a daily log file.
-    History auto-rotated: files older than 30 days are deleted.
+    History auto-rotated: files older than MaxAgeDays are deleted.
 
     Usage in config.toml:
       pre_build_script  = "powershell -NoProfile -File C:\\GitLab-Runner\\scripts\\Write-JobLog.ps1 -Action start"
@@ -16,9 +16,15 @@
 .PARAMETER Action
     'start' or 'end'
 
+.PARAMETER LogDir
+    Directory for daily job log files. Default: C:\GitLab-Runner\logs\jobs
+
+.PARAMETER MaxAgeDays
+    Days to keep old log files. Default: 30
+
 .NOTES
     File: scripts/Write-JobLog.ps1
-    Log: C:\GitLab-Runner\logs\jobs\jobs-YYYY-MM-DD.log
+    Log: <LogDir>\jobs-YYYY-MM-DD.log
 
     Environment variables used (set by GitLab Runner):
       CI_JOB_ID, CI_JOB_NAME, CI_PROJECT_NAME, CI_PIPELINE_ID,
@@ -28,28 +34,29 @@
 param(
     [Parameter(Mandatory)]
     [ValidateSet('start', 'end')]
-    [string]$Action
+    [string]$Action,
+
+    [string]$LogDir     = 'C:\GitLab-Runner\logs\jobs',
+    [int]$MaxAgeDays    = 30
 )
 
 $ErrorActionPreference = 'Continue'
-$logDir     = 'C:\GitLab-Runner\logs\jobs'
-$maxAgeDays = 30
 
-if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+if (-not (Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
 
 # ── Gather job info from CI environment variables ────────────
 $now         = Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
 $today       = Get-Date -Format 'yyyy-MM-dd'
-$jobId       = $env:CI_JOB_ID       ?? 'unknown'
-$jobName     = $env:CI_JOB_NAME     ?? 'unknown'
-$project     = $env:CI_PROJECT_NAME ?? 'unknown'
-$pipelineId  = $env:CI_PIPELINE_ID  ?? 'unknown'
-$source      = $env:CI_PIPELINE_SOURCE ?? 'unknown'
-$user        = $env:GITLAB_USER_LOGIN  ?? 'unknown'
-$status      = $env:CI_JOB_STATUS      ?? 'n/a'
+$jobId       = if ($env:CI_JOB_ID)           { $env:CI_JOB_ID }           else { 'unknown' }
+$jobName     = if ($env:CI_JOB_NAME)         { $env:CI_JOB_NAME }         else { 'unknown' }
+$project     = if ($env:CI_PROJECT_NAME)     { $env:CI_PROJECT_NAME }     else { 'unknown' }
+$pipelineId  = if ($env:CI_PIPELINE_ID)      { $env:CI_PIPELINE_ID }      else { 'unknown' }
+$source      = if ($env:CI_PIPELINE_SOURCE)  { $env:CI_PIPELINE_SOURCE }  else { 'unknown' }
+$user        = if ($env:GITLAB_USER_LOGIN)   { $env:GITLAB_USER_LOGIN }   else { 'unknown' }
+$status      = if ($env:CI_JOB_STATUS)       { $env:CI_JOB_STATUS }       else { 'n/a' }
 $hostname    = $env:COMPUTERNAME
 
-$logFile = Join-Path $logDir "jobs-$today.log"
+$logFile = Join-Path $LogDir "jobs-$today.log"
 
 # ── Write log line ───────────────────────────────────────────
 if ($Action -eq 'start') {
@@ -79,6 +86,6 @@ else {
 $line | Out-File $logFile -Append -Encoding UTF8
 
 # ── Rotate old logs ──────────────────────────────────────────
-Get-ChildItem $logDir -Filter 'jobs-*.log' | Where-Object {
-    $_.LastWriteTime -lt (Get-Date).AddDays(-$maxAgeDays)
+Get-ChildItem $LogDir -Filter 'jobs-*.log' | Where-Object {
+    $_.LastWriteTime -lt (Get-Date).AddDays(-$MaxAgeDays)
 } | Remove-Item -Force -ErrorAction SilentlyContinue

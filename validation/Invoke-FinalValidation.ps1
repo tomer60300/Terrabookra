@@ -61,7 +61,7 @@ function Invoke-FinalValidation {
     Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
     Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }
     Check 'Helper image present'        { (docker images $Script:Config.HelperImage --format '{{.Tag}}' 2>$null) -match 'v16.7.0' }
-    Check 'Scheduled tasks (>=8)'       { (Get-ScheduledTask | Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log)-' } | Measure-Object).Count -ge 8 }
+    Check 'Scheduled tasks (>=10)'      { (Get-ScheduledTask | Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } | Measure-Object).Count -ge 10 }
     Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
     Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
     Check 'Disk free >= 50 GB'          { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }

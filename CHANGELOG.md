@@ -50,13 +50,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
    - Registry API v2 manifest HEAD for all 3 Harbor pre-pull images — no pull
    - Runs standalone or integrated from Phase 1 step 1.0
    - Color-coded output with PASS/FAIL per check, summary with failed items
-   - Event Log entries: 9020 (all pass) / 9021 (failures)
+   - Event Log entries: 9030 (all pass) / 9031 (failures)
    - New S3 key: `S3KeysExtra.DepValidator`
 
 8. **Phase 1** — New step 1.0 runs dependency validation as pre-flight check.
    PATH additions now use Config keys instead of hardcoded paths.
 
 9. **Invoke-FinalValidation.ps1** — Defender exclusion check uses `$Config.RunnerDir`
+
+### Fixed — 6 bugs found in deep audit
+
+1. **CRITICAL: `Write-JobLog.ps1` — PS 5.1 parse error** — All 7 env-var
+   assignments used `??` null-coalescing operator (PS 7.1+ only). Causes
+   immediate parse error on Server 2019. Rewritten to `if/else`. Also added
+   `-LogDir` and `-MaxAgeDays` parameters (missed in parameterization sweep).
+
+2. **`Export-RdpAuditLog.ps1` — missing parameters** — Missed in parameterization
+   sweep. Added `-LogDir` and `-MaxAgeDays` parameters.
+
+3. **`Invoke-FinalValidation.ps1` — task count check missed 2 tasks** — Regex
+   `'^(Docker|Runner|Disk|Log)-'` didn't match `Network-Connectivity-Monitor`
+   or `RDP-Audit-Logger`. Fixed to `'^(Docker|Runner|Disk|Log|Network|RDP)-'`
+   with threshold `>=10` (was `>=8`).
+
+4. **`Phase3-RunnerSetup.ps1` — ConvertTo-Json array unwrapping** — Pipeline
+   `$Config.MonitorHosts | ConvertTo-Json` unwraps single-element arrays in
+   PS 5.1 (produces JSON object instead of array). Fixed with
+   `ConvertTo-Json -InputObject @($Config.MonitorHosts) -Depth 2`.
+
+5. **`Phase3-RunnerSetup.ps1` — missing -OutputPath** — `Write-GoldenVersion`
+   call didn't pass `-OutputPath`, so version stamp always went to hardcoded
+   default. Now passes `(Join-Path $Config.RunnerDir '.golden-version')`.
+
+6. **`Test-Dependencies.ps1` — event ID collision** — Used 9020/9021 which
+   collided with `Import-Certificates.ps1`. Changed to 9030/9031.
 
 ---
 
