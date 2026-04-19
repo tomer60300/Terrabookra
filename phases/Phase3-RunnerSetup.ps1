@@ -150,7 +150,9 @@ function Invoke-Phase3 {
                 $runnerToken = $Matches[1]
                 Write-Log "Extracted auth token: glrt-***"
             } else {
-                Write-LogWarn 'Could not extract auth token from registration output -- using original token'
+                Write-LogError 'Registration returned 0 but no glrt- token found in config.toml.'
+                Write-LogError 'Original token (PAT/legacy) is NOT a valid runner auth token -- aborting.'
+                $Script:RunnerRegistrationFailed = $true
             }
         } else {
             Write-LogError 'Runner registration FAILED (non-zero exit).'
