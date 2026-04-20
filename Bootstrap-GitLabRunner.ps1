@@ -160,6 +160,16 @@ function Get-BootstrapS3Object {
             $wc.DownloadFile($url, $OutFile)
             if (Test-Path $OutFile) {
                 $size = (Get-Item $OutFile).Length
+                if ($size -eq 0) {
+                    throw "Downloaded file is empty (0 bytes)"
+                }
+                # Detect S3/MinIO XML error responses saved as files
+                $head = Get-Content $OutFile -TotalCount 1 -ErrorAction SilentlyContinue
+                if ($head -and ($head -match '^\s*<\?xml' -or $head -match '^\s*<Error')) {
+                    $errContent = Get-Content $OutFile -Raw -ErrorAction SilentlyContinue
+                    Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+                    throw "MinIO returned an error response (check credentials/bucket): $($errContent.Substring(0, [Math]::Min(200, $errContent.Length)))"
+                }
                 Write-BootstrapLog "Downloaded $Key -> $OutFile ($size bytes)"
                 return $true
             }
