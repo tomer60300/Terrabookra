@@ -30,21 +30,38 @@ function Invoke-Phase2 {
     }
 
     $dnsServers = Get-DnsServer
-    $daemonConfig = [ordered]@{
-        'insecure-registries'      = $Script:Config.InsecureRegistries
-        'log-driver'               = 'json-file'
-        'log-opts'                 = [ordered]@{ 'max-size' = '50m'; 'max-file' = '5' }
-        'exec-opts'                = @('isolation=process')
-        'max-concurrent-downloads' = 5
-        'max-concurrent-uploads'   = 3
-        'max-download-attempts'    = 5
-        'debug'                    = $false
-        'data-root'                = $Script:Config.DockerDataRoot
-        'group'                    = 'docker-users'
-    }
-    if ($dnsServers.Count -gt 0) { $daemonConfig['dns'] = @($dnsServers) }
+    $registries = ($Script:Config.InsecureRegistries | ForEach-Object { "    `"$_`"" }) -join ",`n"
+    $dataRoot   = $Script:Config.DockerDataRoot -replace '\\', '\\'
 
-    ConvertTo-Json -InputObject $daemonConfig -Depth 4 | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
+    # Build DNS block only if servers detected
+    $dnsBlock = ''
+    if ($dnsServers.Count -ge 2) {
+        $dnsBlock = ",`n  `"dns`": [`"$($dnsServers[0])`", `"$($dnsServers[1])`"]"
+    } elseif ($dnsServers.Count -eq 1) {
+        $dnsBlock = ",`n  `"dns`": [`"$($dnsServers[0])`"]"
+    }
+
+    $daemonJson = @"
+{
+  "insecure-registries": [
+$registries
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "5"
+  },
+  "exec-opts": ["isolation=process"],
+  "max-concurrent-downloads": 5,
+  "max-concurrent-uploads": 3,
+  "max-download-attempts": 5,
+  "debug": false,
+  "data-root": "$dataRoot",
+  "group": "docker-users"$dnsBlock
+}
+"@
+
+    $daemonJson | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
     Write-Log "daemon.json written (data-root: $($Script:Config.DockerDataRoot))"
 
     if (-not (Test-Path $Script:Config.DockerDataRoot)) {
