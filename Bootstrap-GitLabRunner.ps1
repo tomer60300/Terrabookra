@@ -260,8 +260,14 @@ function Invoke-Phase0 {
 # ============================================================
 
 try {
+    # Read version stamp
+    $versionFile = Join-Path $PSScriptRoot 'VERSION'
+    if (-not (Test-Path $versionFile)) { $versionFile = Join-Path $Script:BootstrapDir 'VERSION' }
+    $versionStamp = if (Test-Path $versionFile) { (Get-Content $versionFile -First 1).Trim() } else { 'unknown' }
+
     Write-BootstrapLog '============================================'
     Write-BootstrapLog "Bootstrap-GitLabRunner.ps1 -- START"
+    Write-BootstrapLog "Version: $versionStamp"
     Write-BootstrapLog "Host: $env:COMPUTERNAME | OS: $([System.Environment]::OSVersion.VersionString)"
     Write-BootstrapLog "Script root: $Script:ScriptRoot"
     Write-BootstrapLog '============================================'
