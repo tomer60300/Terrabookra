@@ -1,20 +1,14 @@
 #!/bin/sh
 # Auto-update VERSION file after every commit.
-# Format: {GoldenImageVersion}+{short-hash}  (e.g. 2.3.1+96c20df)
+# Format: {GoldenImageVersion}+{short-hash}  (e.g. 2.3.1+c8b0bb9)
+#
+# The VERSION file in the working tree always reflects the CURRENT commit.
+# It gets included in the next commit automatically.
 #
 # Install: git config core.hooksPath .githooks
-
-# Guard against recursive trigger from the amend below
-[ -n "$SKIP_VERSION_HOOK" ] && exit 0
 
 VERSION_NUM=$(grep "GoldenImageVersion" lib/Config.ps1 2>/dev/null | grep -oP "'\K[^']+")
 [ -z "$VERSION_NUM" ] && VERSION_NUM="unknown"
 
 COMMIT_HASH=$(git rev-parse --short HEAD)
-
 echo "${VERSION_NUM}+${COMMIT_HASH}" > VERSION
-
-git add VERSION
-SKIP_VERSION_HOOK=1 GIT_AUTHOR_DATE="$(git log -1 --format=%aD)" \
-GIT_COMMITTER_DATE="$(git log -1 --format=%cD)" \
-git commit --amend --no-edit --no-verify > /dev/null 2>&1
