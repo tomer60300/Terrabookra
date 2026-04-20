@@ -230,6 +230,18 @@ function Invoke-Phase0 {
         exit 1
     }
 
+    # Log directory listing so the operator can verify file placement
+    Write-BootstrapLog "Project files on disk ($Script:BootstrapDir):"
+    foreach ($sub in @('lib', 'phases', 'validation')) {
+        $dir = Join-Path $Script:BootstrapDir $sub
+        if (Test-Path $dir) {
+            foreach ($f in (Get-ChildItem -Path $dir -File)) {
+                $sizeKB = [math]::Round($f.Length / 1KB, 1)
+                Write-BootstrapLog "  $sub\$($f.Name)  (${sizeKB} KB)"
+            }
+        }
+    }
+
     Write-BootstrapLog '========== PHASE 0 COMPLETE =========='
 }
 
