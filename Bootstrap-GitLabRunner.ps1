@@ -43,6 +43,7 @@
 # Edit ONLY these values to match your environment.
 # ============================================================
 
+$Script:BootstrapVersion   = '2.3.1+DEV'
 $Script:BootstrapEndpoint  = 'https://kayhut-minio.com:9000'
 $Script:BootstrapBucket    = 'gitlab-runner-golden'
 $Script:BootstrapAccessKey = 'YOUR_ACCESS_KEY_HERE'
@@ -260,14 +261,9 @@ function Invoke-Phase0 {
 # ============================================================
 
 try {
-    # Read version stamp
-    $versionFile = Join-Path $PSScriptRoot 'VERSION'
-    if (-not (Test-Path $versionFile)) { $versionFile = Join-Path $Script:BootstrapDir 'VERSION' }
-    $versionStamp = if (Test-Path $versionFile) { (Get-Content $versionFile -First 1).Trim() } else { 'unknown' }
-
     Write-BootstrapLog '============================================'
     Write-BootstrapLog "Bootstrap-GitLabRunner.ps1 -- START"
-    Write-BootstrapLog "Version: $versionStamp"
+    Write-BootstrapLog "Version: $Script:BootstrapVersion"
     Write-BootstrapLog "Host: $env:COMPUTERNAME | OS: $([System.Environment]::OSVersion.VersionString)"
     Write-BootstrapLog "Script root: $Script:ScriptRoot"
     Write-BootstrapLog '============================================'

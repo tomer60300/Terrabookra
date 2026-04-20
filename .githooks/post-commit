@@ -1,9 +1,8 @@
 #!/bin/sh
-# Auto-update VERSION file after every commit.
-# Format: {GoldenImageVersion}+{short-hash}  (e.g. 2.3.1+c8b0bb9)
-#
-# The VERSION file in the working tree always reflects the CURRENT commit.
-# It gets included in the next commit automatically.
+# Auto-update version stamp after every commit.
+# Updates two locations:
+#   1. VERSION file          (for humans / USB transfer tracking)
+#   2. $Script:BootstrapVersion in Bootstrap-GitLabRunner.ps1 (for runtime logging)
 #
 # Install: git config core.hooksPath .githooks
 
@@ -11,4 +10,12 @@ VERSION_NUM=$(grep "GoldenImageVersion" lib/Config.ps1 2>/dev/null | grep -oP "'
 [ -z "$VERSION_NUM" ] && VERSION_NUM="unknown"
 
 COMMIT_HASH=$(git rev-parse --short HEAD)
-echo "${VERSION_NUM}+${COMMIT_HASH}" > VERSION
+STAMP="${VERSION_NUM}+${COMMIT_HASH}"
+
+# 1. Update VERSION file
+echo "$STAMP" > VERSION
+
+# 2. Update embedded version in Bootstrap-GitLabRunner.ps1
+if [ -f Bootstrap-GitLabRunner.ps1 ]; then
+    sed -i "s/^\$Script:BootstrapVersion.*=.*/\$Script:BootstrapVersion   = '${STAMP}'/" Bootstrap-GitLabRunner.ps1
+fi
