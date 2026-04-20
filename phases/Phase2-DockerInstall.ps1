@@ -32,7 +32,6 @@ function Invoke-Phase2 {
     $dnsServers = Get-DnsServer
     $daemonConfig = [ordered]@{
         'insecure-registries'      = $Script:Config.InsecureRegistries
-        'storage-driver'           = 'windowsfilter'
         'log-driver'               = 'json-file'
         'log-opts'                 = [ordered]@{ 'max-size' = '50m'; 'max-file' = '5' }
         'exec-opts'                = @('isolation=process')
