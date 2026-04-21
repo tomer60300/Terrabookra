@@ -64,8 +64,21 @@ $registries
     $daemonJson | Out-File -FilePath $Script:Config.DaemonJson -Encoding UTF8 -Force
     Write-Log "daemon.json written (data-root: $($Script:Config.DockerDataRoot))"
 
+    # Ensure data-root exists and is on NTFS before dockerd starts
     if (-not (Test-Path $Script:Config.DockerDataRoot)) {
         New-Item -Path $Script:Config.DockerDataRoot -ItemType Directory -Force | Out-Null
+    }
+    $drLetter = ($Script:Config.DockerDataRoot).Substring(0, 1)
+    $drInfo   = Get-Volume -DriveLetter $drLetter -ErrorAction SilentlyContinue
+    if ($drInfo) {
+        if ($drInfo.FileSystemType -ne 'NTFS') {
+            Write-LogError "FATAL: data-root drive ${drLetter}: is $($drInfo.FileSystemType) -- must be NTFS"
+            exit 1
+        }
+        $freeGB = [math]::Round($drInfo.SizeRemaining / 1GB, 1)
+        Write-Log "data-root drive ${drLetter}: filesystem=NTFS free=${freeGB}GB"
+    } else {
+        Write-LogWarn "Could not verify drive ${drLetter}: -- ensure it is NTFS"
     }
 
     # -- 2.2 Download Docker binaries -------------------------
@@ -103,6 +116,19 @@ $registries
 
         Start-Service docker -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 10
+
+        # Verify service didn't crash (Error 1067 = daemon.json invalid or driver failure)
+        $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
+        if ($dockerSvc -and $dockerSvc.Status -eq 'Stopped') {
+            Write-LogError 'Docker service started but crashed (Error 1067).'
+            Write-LogError 'Check daemon.json for invalid options or data-root drive issues.'
+            Write-LogError "daemon.json: $($Script:Config.DaemonJson)"
+            Write-LogError "data-root:   $($Script:Config.DockerDataRoot)"
+            # Dump daemon.json to log for remote debugging
+            $djContent = Get-Content $Script:Config.DaemonJson -Raw -ErrorAction SilentlyContinue
+            Write-LogError "daemon.json content:`n$djContent"
+            exit 1
+        }
     }
 
     # -- Mark + dispatch --------------------------------------
