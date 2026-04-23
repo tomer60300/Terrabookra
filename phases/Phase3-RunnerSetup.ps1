@@ -53,18 +53,40 @@ function Invoke-Phase3 {
     $dockerIsolation = docker info --format '{{.Isolation}}' 2>$null
     Write-Log "Docker: version=$dockerVersion isolation=$dockerIsolation"
 
-    # -- 3.2 Defender exclusions ------------------------------
-    Write-Log '3.2 Defender exclusions'
+    # -- 3.2 Defender configuration ----------------------------
+    Write-Log '3.2 Configure Windows Defender (exclusions + scheduled scan only)'
+
+    # Path exclusions -- high-I/O directories
     foreach ($p in @($Script:Config.RunnerDir, $Script:Config.DockerConfigDir,
                      $Script:Config.DockerDir, $Script:Config.BuildsDir,
                      $Script:Config.CacheDir, $Script:Config.DockerDataRoot)) {
         try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue }
         catch { Write-LogWarn "Defender path exclusion failed: $p" }
     }
+
+    # Process exclusions -- runner and Docker binaries
     foreach ($p in @('gitlab-runner.exe', 'dockerd.exe', 'docker.exe', 'containerd.exe', 'git.exe')) {
         try { Add-MpPreference -ExclusionProcess $p -ErrorAction SilentlyContinue }
         catch { Write-LogWarn "Defender process exclusion failed: $p" }
     }
+
+    # Disable real-time monitoring -- CI runner I/O is too heavy for continuous scanning.
+    # Defender stays installed; scheduled scan runs nightly instead.
+    try {
+        Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+        Write-Log 'Defender real-time monitoring DISABLED (scheduled scan only)'
+    } catch { Write-LogWarn "Failed to disable real-time monitoring: $_" }
+
+    # Schedule full scan at 02:00 daily (ScanScheduleQuickScanTime = minutes from midnight)
+    try {
+        Set-MpPreference -ScanScheduleQuickScanTime 120 -ErrorAction SilentlyContinue
+        Set-MpPreference -ScanParameters 2 -ErrorAction SilentlyContinue           # 2 = Full scan
+        Set-MpPreference -RemediationScheduleDay 0 -ErrorAction SilentlyContinue   # 0 = Every day
+        Set-MpPreference -RemediationScheduleTime 120 -ErrorAction SilentlyContinue # 02:00
+        Set-MpPreference -ScanScheduleDay 0 -ErrorAction SilentlyContinue          # 0 = Every day
+        Set-MpPreference -ScanScheduleTime 120 -ErrorAction SilentlyContinue       # 02:00
+        Write-Log 'Defender scheduled scan set to 02:00 daily (full scan)'
+    } catch { Write-LogWarn "Failed to configure scheduled scan: $_" }
 
     # -- 3.3 MinGit -------------------------------------------
     Write-Log '3.3 MinGit'
