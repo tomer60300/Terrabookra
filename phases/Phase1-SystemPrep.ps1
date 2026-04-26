@@ -44,7 +44,9 @@ function Invoke-Phase1 {
         $depExit   = $LASTEXITCODE
         $depResult | ForEach-Object { Write-Log "  dep: $_" }
         if ($depExit -ne 0) {
-            Write-LogWarn "Dependency check: $depExit failures detected -- install may fail later"
+            Write-LogError "FATAL: Dependency validation failed ($depExit). Cannot provision without all dependencies."
+            Write-LogError '  Fix: ensure DNS, MinIO objects, and Harbor images are all reachable, then re-run.'
+            exit 1
         }
     } else {
         Write-LogWarn 'Test-Dependencies.ps1 not found -- skipping pre-flight check'

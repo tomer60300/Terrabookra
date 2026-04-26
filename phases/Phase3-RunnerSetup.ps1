@@ -108,10 +108,19 @@ function Invoke-Phase3 {
         $Script:Config.HarborPass | docker login $Script:Config.HarborUrl -u $Script:Config.HarborUser --password-stdin 2>&1 |
             ForEach-Object { Write-Log "  docker login: $_" }
     }
+    $pullFailures = 0
     foreach ($image in $Script:Config.PrePullImages) {
         Write-Log "Pulling: $image"
         docker pull $image 2>&1 | ForEach-Object { Write-Log "  $_" }
-        if ($LASTEXITCODE -ne 0) { Write-LogWarn "Failed to pull $image -- will pull on first job" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogError "FAILED to pull $image"
+            $pullFailures++
+        }
+    }
+    if ($pullFailures -gt 0) {
+        Write-LogError "FATAL: $pullFailures Harbor image(s) failed to pull. In air-gapped environment images must be pre-pulled."
+        Write-LogError '  Verify Harbor connectivity, credentials, and that images exist in the registry.'
+        exit 1
     }
 
     # -- 3.6 Write config.toml --------------------------------
@@ -371,6 +380,8 @@ log_level = "info"
 
     if ($Script:RunnerRegistrationFailed) {
         Write-LogError '========== PHASE 3 COMPLETE -- RUNNER IS DEGRADED (registration or service failed) =========='
+        Write-LogError 'Exiting with code 1 so Be1 knows this VM is NOT operational.'
+        exit 1
     } else {
         Write-Log '========== PHASE 3 COMPLETE -- RUNNER IS OPERATIONAL =========='
     }

@@ -8,7 +8,7 @@
 
     Three check categories:
       1. DNS -- resolves every hostname from Config.MonitorHosts
-      2. MinIO S3 -- HEAD request (AWS SigV4) for all 25 S3 objects
+      2. MinIO S3 -- HEAD request (AWS SigV4) for all S3 objects (keys, extras, certs, bootstrap)
       3. Harbor -- Registry API v2 manifest HEAD for all pre-pull images
 
     Can run in two modes:
@@ -155,6 +155,9 @@ if (-not $SkipS3) {
     }
     foreach ($key in $Script:Config.S3Certs) {
         [void]$allS3Keys.Add($key)
+    }
+    foreach ($kv in $Script:Config.S3Bootstrap.GetEnumerator()) {
+        [void]$allS3Keys.Add($kv.Value)
     }
 
     $endpoint  = $Script:Config.MinioEndpoint
