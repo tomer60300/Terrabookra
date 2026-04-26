@@ -9,7 +9,7 @@
     Called by .gitlab-ci.yml with credentials from CI/CD variables.
 
 .PARAMETER Endpoint
-    MinIO endpoint URL (e.g. https://kayhut-minio.com:9000)
+    MinIO endpoint URL (e.g. https://minio-host:9000)
 
 .PARAMETER Bucket
     Target S3 bucket name

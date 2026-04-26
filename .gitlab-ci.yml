@@ -1,29 +1,41 @@
-# GitLab CI/CD -- Auto-sync repo files to MinIO
+# GitLab CI/CD -- Validate aliases + sync to MinIO
 # GitLab 16.7.10-ee (self-managed, internal network)
 #
-# Setup (one-time):
-#   1. Go to Settings > CI/CD > Variables
-#   2. Add these variables (masked + protected):
-#        MINIO_ACCESS_KEY  = your MinIO access key
-#        MINIO_SECRET_KEY  = your MinIO secret key
-#   3. Ensure the runner tag matches your Windows runner
+# IMPORTANT: This repo must contain ACTUAL hostnames, not aliases.
+#            Aliases (*.kayhut.com) belong only in the public GitHub repo.
 #
-# The pipeline uploads all PowerShell scripts and config files
-# to the correct S3 keys in MinIO bucket 'gitlab-runner-golden'.
-# Binaries (docker.exe, runner, tools) are NOT synced -- they
-# don't change with code pushes and are uploaded manually.
+# Setup (one-time):
+#   1. Go to Settings > CI/CD > Variables (masked + protected):
+#        MINIO_ENDPOINT    = https://<real-minio-host>:9000
+#        MINIO_ACCESS_KEY  = MinIO access key
+#        MINIO_SECRET_KEY  = MinIO secret key
+#   2. Ensure the runner tag matches your Windows runner
 
 stages:
+  - validate
   - sync
+
+validate-no-aliases:
+  stage: validate
+  tags:
+    - windows
+    - docker
+  script:
+    - >
+      powershell -NoProfile -ExecutionPolicy Bypass
+      -File ci\Validate-NoAliases.ps1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
 
 sync-to-minio:
   stage: sync
   tags:
     - windows
     - docker
-  image: ${CI_HARBOR_IMAGE:-harbor.kayhut.com/golden-image/servercore:ltsc2019}
+  needs:
+    - validate-no-aliases
   variables:
-    MINIO_ENDPOINT: "https://kayhut-minio.com:9000"
     MINIO_BUCKET: "gitlab-runner-golden"
     MINIO_REGION: "us-east-1"
   script:
@@ -36,7 +48,6 @@ sync-to-minio:
       -SecretKey $env:MINIO_SECRET_KEY
       -Region $env:MINIO_REGION
   rules:
-    # Run on push to main -- only when relevant files change
     - if: $CI_COMMIT_BRANCH == "main"
       changes:
         - Bootstrap-GitLabRunner.ps1
@@ -45,7 +56,6 @@ sync-to-minio:
         - validation/**/*
         - scripts/**/*
         - tools/opencode/opencode.jsonc
-    # Manual trigger from any branch (for testing)
     - if: $CI_COMMIT_BRANCH
       when: manual
       allow_failure: true
