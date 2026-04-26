@@ -1,0 +1,51 @@
+# GitLab CI/CD -- Auto-sync repo files to MinIO
+# GitLab 16.7.10-ee (self-managed, internal network)
+#
+# Setup (one-time):
+#   1. Go to Settings > CI/CD > Variables
+#   2. Add these variables (masked + protected):
+#        MINIO_ACCESS_KEY  = your MinIO access key
+#        MINIO_SECRET_KEY  = your MinIO secret key
+#   3. Ensure the runner tag matches your Windows runner
+#
+# The pipeline uploads all PowerShell scripts and config files
+# to the correct S3 keys in MinIO bucket 'gitlab-runner-golden'.
+# Binaries (docker.exe, runner, tools) are NOT synced -- they
+# don't change with code pushes and are uploaded manually.
+
+stages:
+  - sync
+
+sync-to-minio:
+  stage: sync
+  tags:
+    - windows
+    - docker
+  image: ${CI_HARBOR_IMAGE:-harbor.kayhut.com/golden-image/servercore:ltsc2019}
+  variables:
+    MINIO_ENDPOINT: "https://kayhut-minio.com:9000"
+    MINIO_BUCKET: "gitlab-runner-golden"
+    MINIO_REGION: "us-east-1"
+  script:
+    - >
+      powershell -NoProfile -ExecutionPolicy Bypass
+      -File ci\Sync-ToMinio.ps1
+      -Endpoint $env:MINIO_ENDPOINT
+      -Bucket $env:MINIO_BUCKET
+      -AccessKey $env:MINIO_ACCESS_KEY
+      -SecretKey $env:MINIO_SECRET_KEY
+      -Region $env:MINIO_REGION
+  rules:
+    # Run on push to main -- only when relevant files change
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - Bootstrap-GitLabRunner.ps1
+        - lib/**/*
+        - phases/**/*
+        - validation/**/*
+        - scripts/**/*
+        - tools/opencode/opencode.jsonc
+    # Manual trigger from any branch (for testing)
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+      allow_failure: true
