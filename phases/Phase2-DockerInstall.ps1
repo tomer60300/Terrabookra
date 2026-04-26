@@ -6,7 +6,7 @@
     Called after Phase 1 marker is detected.
     Installs Docker from raw binaries (not Mirantis):
 
-    2.1  Write daemon.json (insecure registries, process isolation, data-root)
+    2.1  Write daemon.json (insecure registries, logging, data-root)
     2.2  Download docker.exe + dockerd.exe from MinIO
     2.3  Register dockerd as Windows service
 
@@ -29,17 +29,13 @@ function Invoke-Phase2 {
         Write-Log 'Created local group: docker-users'
     }
 
-    $dnsServers = @(Get-DnsServer)
     $registries = ($Script:Config.InsecureRegistries | ForEach-Object { "    `"$_`"" }) -join ",`n"
     $dataRoot   = $Script:Config.DockerDataRoot -replace '\\', '\\'
 
-    # Build DNS block only if servers detected
-    $dnsBlock = ''
-    if ($dnsServers.Count -ge 2) {
-        $dnsBlock = ",`n  `"dns`": [`"$($dnsServers[0])`", `"$($dnsServers[1])`"]"
-    } elseif ($dnsServers.Count -eq 1) {
-        $dnsBlock = ",`n  `"dns`": [`"$($dnsServers[0])`"]"
-    }
+    # NOTE: dns and exec-opts deliberately omitted:
+    #   dns            -- process isolation inherits host DNS (domain-joined via Be1)
+    #   exec-opts      -- isolation=process is the default on Windows Server 2019
+    #   storage-driver -- windowsfilter is the implicit default on Windows (Docker 25.x rejects it)
 
     $daemonJson = @"
 {
@@ -51,13 +47,12 @@ $registries
     "max-size": "50m",
     "max-file": "5"
   },
-  "exec-opts": ["isolation=process"],
   "max-concurrent-downloads": 5,
   "max-concurrent-uploads": 3,
   "max-download-attempts": 5,
   "debug": false,
   "data-root": "$dataRoot",
-  "group": "docker-users"$dnsBlock
+  "group": "docker-users"
 }
 "@
 

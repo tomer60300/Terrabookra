@@ -139,10 +139,9 @@ function Invoke-Phase3 {
     }
 
     $hostname   = $env:COMPUTERNAME
-    $dnsServers = @(Get-DnsServer)
-    $dnsLine = ''
-    if ($dnsServers.Count -ge 2) { $dnsLine = "    dns = [`"$($dnsServers[0])`", `"$($dnsServers[1])`"]" }
-    elseif ($dnsServers.Count -eq 1) { $dnsLine = "    dns = [`"$($dnsServers[0])`"]" }
+
+    # NOTE: dns deliberately omitted from [runners.docker]:
+    #   process isolation inherits host DNS (domain-joined via Be1)
 
     $buildsVol = "$($Script:Config.BuildsDir -replace '\\','\\'):C:\\builds"
     $cacheVol  = "$($Script:Config.CacheDir  -replace '\\','\\'):C:\\cache"
@@ -218,7 +217,6 @@ log_level = "info"
     privileged = false
     shm_size = 268435456
     volumes = ["$buildsVol", "$cacheVol"]
-$dnsLine
     allowed_images = []
     allowed_services = []
     wait_for_services_timeout = 30
