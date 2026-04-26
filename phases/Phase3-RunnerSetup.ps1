@@ -139,7 +139,7 @@ function Invoke-Phase3 {
     }
 
     $hostname   = $env:COMPUTERNAME
-    $dnsServers = Get-DnsServer
+    $dnsServers = @(Get-DnsServer)
     $dnsLine = ''
     if ($dnsServers.Count -ge 2) { $dnsLine = "    dns = [`"$($dnsServers[0])`", `"$($dnsServers[1])`"]" }
     elseif ($dnsServers.Count -eq 1) { $dnsLine = "    dns = [`"$($dnsServers[0])`"]" }

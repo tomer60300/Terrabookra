@@ -235,16 +235,18 @@ function Wait-ServiceRunning {
 function Get-DnsServer {
     <#
     .SYNOPSIS  Return up to 2 DNS server addresses from active adapters.
+    .NOTES     Wraps result in @() to prevent PS 5.1 from unwrapping a single
+               string into a char array when indexed with [0].
     #>
     $servers = @()
     try {
         $adapters = Get-DnsClientServerAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
                     Where-Object { $_.ServerAddresses.Count -gt 0 }
         foreach ($a in $adapters) { $servers += $a.ServerAddresses }
-        $servers = $servers | Select-Object -Unique | Select-Object -First 2
+        $servers = @($servers | Select-Object -Unique | Select-Object -First 2)
     }
     catch { Write-LogWarn "DNS auto-detect failed: $_" }
-    return $servers
+    return , $servers
 }
 
 # ============================================================

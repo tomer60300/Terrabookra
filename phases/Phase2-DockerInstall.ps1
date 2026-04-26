@@ -29,7 +29,7 @@ function Invoke-Phase2 {
         Write-Log 'Created local group: docker-users'
     }
 
-    $dnsServers = Get-DnsServer
+    $dnsServers = @(Get-DnsServer)
     $registries = ($Script:Config.InsecureRegistries | ForEach-Object { "    `"$_`"" }) -join ",`n"
     $dataRoot   = $Script:Config.DockerDataRoot -replace '\\', '\\'
 
