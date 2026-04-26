@@ -43,7 +43,7 @@
 # Edit ONLY these values to match your environment.
 # ============================================================
 
-$Script:BootstrapVersion   = '2.3.1+e8d705c'
+$Script:BootstrapVersion   = '2.3.1+8d7b6e7'
 $Script:BootstrapEndpoint  = 'https://kayhut-minio.com:9000'
 $Script:BootstrapBucket    = 'gitlab-runner-golden'
 $Script:BootstrapAccessKey = 'YOUR_ACCESS_KEY_HERE'
