@@ -6,6 +6,99 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.0] -- 2026-04-28
+
+Major feature release: new operator tool inventory, observability stack,
+SSH-based remote control plane, OpenCode + WebView2 silent install,
+graceful Hyper-V degradation, and a self-extending validation suite.
+
+### Added
+
+- **Table-driven tool installer** -- `scripts/Install-Tools.ps1` reads
+  `$Script:Config.ToolPackages` (14 rows) and installs each tool with the
+  right method (exe / msi / zip / copy / msixbundle), silent flag, detection
+  probe, and optional PostInstall hook. Adding a tool means adding one row;
+  no script edits.
+  - **Tools delivered:** WinRAR, NSSM, Sysinternals, Notepad++, WinMerge,
+    BareTail, Klogg, Everything (with indexer service), WizTree, System
+    Informer 4.0, EventLook, Wireshark + tshark, Google Chrome, Windows
+    Terminal (portable, configured as default UX for PS + CMD).
+- **Observability stack** -- `scripts/Install-Observability.ps1` brings up
+  four Prometheus scrape endpoints per runner:
+  - `:9182` `windows_exporter` (MSI service) -- host metrics
+  - `:9115` `blackbox_exporter` (NSSM service) -- ICMP/TCP/HTTP probes
+  - `:9252` GitLab Runner built-in -- via `listen_address` in `config.toml`
+  - `:9323` Docker daemon built-in -- via `metrics-addr` + `experimental:true`
+    in `daemon.json`
+  Inbound firewall rules opened for all four ports.
+- **OpenCode desktop with WebView2 prerequisite** --
+  `scripts/Install-OpenCode.ps1` silently installs WebView2 Evergreen runtime
+  (hard prerequisite), then OpenCode itself via NSIS (`/S`), then publishes
+  `opencode.jsonc` to the machine-wide path `C:\ProgramData\opencode\` and
+  sets the `OPENCODE_CONFIG` Machine env var so every user reads the same
+  config.
+- **OpenSSH remote control plane** -- `scripts/Enable-RemoteSSH.ps1` replaces
+  the prior WinRM step (`Enable-RemotePowerShell.ps1`, deleted) which was
+  blocked by domain GPO. Installs OpenSSH-Win64 from a portable zip (no
+  `Add-WindowsCapability`, no BITS, fully air-gapped), registers `sshd`,
+  opens TCP 22, sets PowerShell as the default shell, writes a managed
+  `sshd_config` block enabling AD password auth + optional `AllowGroups`
+  whitelist (configurable via `OpenSshAllowedADGroups` in `Config.ps1`),
+  and optionally seeds `administrators_authorized_keys` for SSH-key
+  fallback.
+- **Set-WindowsTerminalDefault.ps1** -- portable-mode Windows Terminal
+  configuration. Drops a `.portable` marker, writes machine-wide
+  `settings.json` to `<install_dir>\settings\`, replaces Default User Start
+  Menu shortcuts for PowerShell and CMD with Terminal-launching ones, adds
+  `wt` to PATH.
+- **Auto-extending validation** -- `validation/Invoke-FinalValidation.ps1`
+  now generates one validation check per row in `$Config.ToolPackages` plus
+  dedicated checks for `sshd`, `windows_exporter`, `blackbox_exporter`,
+  Docker `metrics-addr`, runner metrics firewall, WebView2, OpenCode config,
+  and `OPENCODE_CONFIG` env var.
+- **Hyper-V graceful skip across reboot** -- Phase 1 now detects VT-x
+  exposure before attempting `Install-WindowsFeature -Name Hyper-V`. When
+  the host doesn't expose nested virtualization, Phase 1 logs a clear WARN
+  and writes `C:\GitLab-Runner\.hyperv_skipped`. Validation in Phase 3
+  reads the marker (in-memory variables don't survive the Phase 1 -> 3
+  reboot). Runner continues fine on docker-windows process isolation.
+- **gitlab-runner stop/uninstall pre-check** -- Phase 3 step 3.8 now skips
+  `stop`/`uninstall` when no service exists, eliminating the FATAL log
+  noise on first install.
+- **GitLab CI/CD verification stage** -- new `verify-minio` stage in
+  `.gitlab-ci.yml` runs `validation/Test-Dependencies.ps1` after sync, so
+  missing or forgotten S3 keys fail in CI rather than at first runner
+  provision.
+- **Fleet scripts now use OpenSSH** -- `fleet/Get-FleetHealth.ps1` and
+  `fleet/Invoke-FleetCommand.ps1` rewritten to drive runners over OpenSSH
+  instead of PSRemoting/WinRM. Support SSH key auth (recommended), AD
+  password auth (per-host prompt), and GSSAPI/Kerberos. Health probe now
+  also reports `sshd`, `windows_exporter`, and `blackbox_exporter` status.
+
+### Changed
+
+- **Path layout under `tools/` in MinIO** -- old flat keys
+  (`tools/winrar-x64-701.exe`, `tools/nssm-2.24.zip`,
+  `tools/sysinternals/procexp64.exe` and 3 siblings) replaced with
+  per-tool subfolders (`tools/winrar/`, `tools/nssm/`,
+  `tools/sysinternals/SysinternalsSuite.zip`). Old keys are not deleted by
+  CI; they're harmless dead bytes.
+- **`config.toml`** now includes `listen_address = ":9252"` for runner metrics.
+- **`daemon.json`** now includes `metrics-addr: "0.0.0.0:9323"` and
+  `experimental: true` (required for Docker metrics-addr in 25.x).
+- **`ci/Sync-ToMinio.ps1`** `$FileMap` extended with the 4 new helper
+  scripts and `Install-OpenCode.ps1`; `Enable-RemotePowerShell.ps1` removed.
+- **`scripts/Write-GoldenVersion.ps1`** stamp now includes a `Tools`
+  inventory (14 entries) and a `MetricsEndpoints` block.
+
+### Removed
+
+- **`scripts/Enable-RemotePowerShell.ps1`** -- obsolete WinRM bootstrap;
+  the GPO that blocks WinRM service config means this script never worked
+  reliably at Kayhut. Replaced by `scripts/Enable-RemoteSSH.ps1`.
+
+---
+
 ## [2.3.1] -- 2026-04-19
 
 ### Fixed -- 9 issues from external code review

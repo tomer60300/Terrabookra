@@ -6,7 +6,8 @@
     Called after Phase 1 marker is detected.
     Installs Docker from raw binaries (not Mirantis):
 
-    2.1  Write daemon.json (insecure registries, logging, data-root)
+    2.1  Write daemon.json (insecure registries, logging, data-root,
+         and Prometheus metrics endpoint on TCP 9323)
     2.2  Download docker.exe + dockerd.exe from MinIO
     2.3  Register dockerd as Windows service
 
@@ -36,6 +37,12 @@ function Invoke-Phase2 {
     #   dns            -- process isolation inherits host DNS (domain-joined via Be1)
     #   exec-opts      -- isolation=process is the default on Windows Server 2019
     #   storage-driver -- windowsfilter is the implicit default on Windows (Docker 25.x rejects it)
+    #
+    # metrics-addr + experimental:true expose the Docker daemon's Prometheus
+    # endpoint on TCP 9323. The endpoint requires experimental mode in Docker
+    # 25.x; it's safe to enable for metrics alone (no other experimental
+    # features get picked up). Firewall hole opened by Install-Observability.ps1.
+    $dockerMetricsPort = $Script:Config.MetricsPorts.Docker
 
     $daemonJson = @"
 {
@@ -52,7 +59,9 @@ $registries
   "max-download-attempts": 5,
   "debug": false,
   "data-root": "$dataRoot",
-  "group": "docker-users"
+  "group": "docker-users",
+  "metrics-addr": "0.0.0.0:$dockerMetricsPort",
+  "experimental": true
 }
 "@
 

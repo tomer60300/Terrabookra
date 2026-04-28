@@ -7,13 +7,13 @@
     Creates a JSON file with the image build metadata so you can query
     any runner to know exactly what version it's running.
 
-    Query from admin PC:
-      Invoke-Command -ComputerName runner01,runner02,runner03 -ScriptBlock {
-          Get-Content C:\GitLab-Runner\.golden-version | ConvertFrom-Json
-      } | Format-Table PSComputerName, ImageVersion, BuildDate, RunnerVersion, DockerVersion
+    Query from admin PC over SSH (WinRM is blocked by GPO -- use OpenSSH):
+      foreach ($h in 'runner01','runner02','runner03') {
+          ssh $h 'powershell -NoProfile -Command "Get-Content C:\GitLab-Runner\.golden-version"'
+      }
 
 .PARAMETER ImageVersion
-    Golden image version string. Default: 2.3.0
+    Golden image version string. Default: 2.4.0
 
 .PARAMETER OutputPath
     Path to write the version stamp JSON. Default: C:\GitLab-Runner\.golden-version
@@ -33,7 +33,7 @@
 #>
 
 param(
-    [string]$ImageVersion = '2.3.0',
+    [string]$ImageVersion = '2.4.0',
     [string]$OutputPath   = 'C:\GitLab-Runner\.golden-version',
     [string]$RunnerBin    = 'C:\GitLab-Runner\gitlab-runner.exe',
     [string]$GitExe       = 'C:\GitLab-Runner\git\cmd\git.exe',
@@ -76,11 +76,42 @@ $stamp = [ordered]@{
     GitVersion     = $gitVersion
     ScriptVersion  = $ImageVersion
     Components     = [ordered]@{
-        Certificates    = (Test-Path (Join-Path $CertsDir '*.crt'))
-        WinRM           = ((Get-Service WinRM -ErrorAction SilentlyContinue).Status -eq 'Running')
-        ScheduledTasks  = (Get-ScheduledTask -ErrorAction SilentlyContinue |
-                          Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } |
-                          Measure-Object).Count
+        Certificates       = (Test-Path (Join-Path $CertsDir '*.crt'))
+        Sshd               = ((Get-Service sshd -EA SilentlyContinue).Status -eq 'Running')
+        WindowsExporter    = ((Get-Service windows_exporter  -EA SilentlyContinue).Status -eq 'Running')
+        BlackboxExporter   = ((Get-Service blackbox_exporter -EA SilentlyContinue).Status -eq 'Running')
+        WebView2           = ([bool](
+            @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+              'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') |
+                Where-Object { Test-Path $_ } | Select-Object -First 1 |
+                ForEach-Object { (Get-ItemProperty -Path $_ -Name pv -EA SilentlyContinue).pv }
+        ))
+        OpenCodeConfig     = (Test-Path 'C:\ProgramData\opencode\opencode.jsonc')
+        ScheduledTasks     = (Get-ScheduledTask -EA SilentlyContinue |
+                              Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } |
+                              Measure-Object).Count
+    }
+    Tools          = [ordered]@{
+        WinRAR          = (Test-Path 'C:\Program Files\WinRAR\WinRAR.exe')
+        NSSM            = (Test-Path 'C:\Tools\nssm.exe')
+        Sysinternals    = (Test-Path 'C:\Tools\SysInternals\procexp64.exe')
+        NotepadPP       = (Test-Path 'C:\Program Files\Notepad++\notepad++.exe')
+        WinMerge        = (Test-Path 'C:\Program Files\WinMerge\WinMergeU.exe')
+        BareTail        = (Test-Path 'C:\Program Files\BareTail\baretail.exe')
+        Klogg           = (Test-Path 'C:\Program Files\klogg\klogg.exe')
+        Everything      = (Test-Path 'C:\Program Files\Everything\Everything.exe')
+        WizTree         = (Test-Path 'C:\Program Files\WizTree\WizTree.exe')
+        SystemInformer  = (Test-Path 'C:\Program Files\SystemInformer\SystemInformer.exe')
+        EventLook       = (Test-Path 'C:\Program Files\EventLook\EventLook.exe')
+        Tshark          = (Test-Path 'C:\Program Files\Wireshark\tshark.exe')
+        Chrome          = (Test-Path 'C:\Program Files\Google\Chrome\Application\chrome.exe')
+        WindowsTerminal = (Test-Path 'C:\Program Files\WindowsTerminal\wt.exe')
+    }
+    MetricsEndpoints = [ordered]@{
+        WindowsExporter  = "http://${env:COMPUTERNAME}:9182/metrics"
+        BlackboxExporter = "http://${env:COMPUTERNAME}:9115/probe"
+        GitLabRunner     = "http://${env:COMPUTERNAME}:9252/metrics"
+        Docker           = "http://${env:COMPUTERNAME}:9323/metrics"
     }
 }
 

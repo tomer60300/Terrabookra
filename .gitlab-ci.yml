@@ -1,8 +1,24 @@
-# GitLab CI/CD -- Validate aliases + sync to MinIO
+# GitLab CI/CD -- Validate aliases + sync to MinIO + post-sync verification.
 # GitLab 16.7.10-ee (self-managed, internal network)
 #
 # IMPORTANT: This repo must contain ACTUAL hostnames, not aliases.
 #            Aliases (*.kayhut.com) belong only in the public GitHub repo.
+#
+# Pipeline shape:
+#   stage 1 -- validate-no-aliases : ci/Validate-NoAliases.ps1 scans every
+#                                    file for public-repo leaks (aliases,
+#                                    "Terrabookra" name)
+#   stage 2 -- sync-to-minio       : ci/Sync-ToMinio.ps1 walks the $FileMap
+#                                    and uploads each file via AWS SigV4
+#   stage 3 -- verify-minio        : validation/Test-Dependencies.ps1 HEAD-
+#                                    checks every S3 key + Harbor manifest
+#                                    so missing/forgotten keys fail in CI
+#                                    rather than at first runner provision
+#
+# Source of truth for what gets synced: ci/Sync-ToMinio.ps1 $FileMap. Adding
+# a new lib/phase/script file requires (a) creating it under the right repo
+# directory and (b) adding the entry to $FileMap. The 'changes:' globs below
+# are wide enough to auto-trigger when any file in those directories changes.
 #
 # Setup (one-time):
 #   1. Go to Settings > CI/CD > Variables (masked + protected):
@@ -14,6 +30,7 @@
 stages:
   - validate
   - sync
+  - verify
 
 validate-no-aliases:
   stage: validate
@@ -47,6 +64,34 @@ sync-to-minio:
       -AccessKey $env:MINIO_ACCESS_KEY
       -SecretKey $env:MINIO_SECRET_KEY
       -Region $env:MINIO_REGION
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - Bootstrap-GitLabRunner.ps1
+        - lib/**/*
+        - phases/**/*
+        - validation/**/*
+        - scripts/**/*
+        - tools/opencode/opencode.jsonc
+    - if: $CI_COMMIT_BRANCH
+      when: manual
+      allow_failure: true
+
+# Post-sync validator: HEAD-check every S3 key + Harbor manifest so a missing
+# or forgotten upload fails CI rather than the next runner provision. Same
+# script Phase 1 runs as a pre-flight; here we run it from the GitLab runner
+# itself, which has DNS + cert access to MinIO and Harbor.
+verify-minio:
+  stage: verify
+  tags:
+    - windows
+    - docker
+  needs:
+    - sync-to-minio
+  script:
+    - >
+      powershell -NoProfile -ExecutionPolicy Bypass
+      -File validation\Test-Dependencies.ps1
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       changes:

@@ -6,19 +6,27 @@
     Called after Phase 2 marker is detected. Final phase -- no reboot after this.
 
     3.1   Verify Docker daemon (12 attempts)
-    3.2   Add Defender exclusions
+    3.2   Configure Windows Defender (exclusions + scheduled scan only)
     3.3   Install MinGit
     3.4   Download GitLab Runner binary
     3.5   Pre-pull Harbor container images
     3.6   Resolve token (glrt- auth token vs registration token / PAT)
     3.7   Register runner (skipped if glrt- token) + write config.toml
-    3.8   Install runner as Windows service
+          (config.toml includes listen_address = ":9252" for runner metrics)
+    3.8   Install runner as Windows service (idempotent stop/uninstall)
     3.9   Deploy maintenance scripts from MinIO
     3.10  Deploy monitor-hosts.json for network connectivity script
     3.11  Register scheduled tasks
-    3.12  Deploy tools (WinRAR, NSSM, SysInternals, OpenCode)
-    3.13  Final validation (17 checks)
-    3.14  Write golden image version stamp
+    3.12  Install tools (table-driven via scripts/Install-Tools.ps1):
+          WinRAR, NSSM, Sysinternals, Notepad++, WinMerge, BareTail, Klogg,
+          Everything, WizTree, System Informer, EventLook, Wireshark/tshark,
+          Chrome, Windows Terminal (with PostInstall: set as default UX)
+    3.13  Install OpenCode (WebView2 prerequisite + machine-wide config)
+    3.14  Install observability stack:
+          windows_exporter (MSI service), blackbox_exporter (NSSM service),
+          firewall holes for runner :9252 and Docker :9323 metrics
+    3.15  Final validation
+    3.16  Write golden image version stamp
 
 .NOTES
     File: phases/Phase3-RunnerSetup.ps1
@@ -207,6 +215,10 @@ check_interval = $($Script:Config.CheckInterval)
 shutdown_timeout = 300
 log_level = "info"
 
+# Prometheus metrics endpoint (consumed by the observability stack).
+# Firewall hole opened by Install-Observability.ps1.
+listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
+
 [[runners]]
   name = "runner-$hostname"
   url = "$($Script:Config.GitLabUrl)"
@@ -238,10 +250,19 @@ log_level = "info"
         Write-Log 'config.toml written'
 
         # -- 3.8 Install runner service (idempotent) --------------
+        # Only call stop/uninstall when the service actually exists -- otherwise
+        # gitlab-runner emits FATAL log lines ("service does not exist") that
+        # look like real failures during first-time install. The actual install
+        # + start is what matters.
         Write-Log '3.8 Install runner service'
-        & $Script:Config.RunnerBin stop 2>$null
-        & $Script:Config.RunnerBin uninstall 2>$null
-        Start-Sleep -Seconds 2
+        if (Get-Service gitlab-runner -ErrorAction SilentlyContinue) {
+            Write-Log '  Existing gitlab-runner service detected -- stopping and uninstalling first'
+            & $Script:Config.RunnerBin stop      2>&1 | ForEach-Object { Write-Log "  stop: $_" }
+            & $Script:Config.RunnerBin uninstall 2>&1 | ForEach-Object { Write-Log "  uninstall: $_" }
+            Start-Sleep -Seconds 2
+        } else {
+            Write-Log '  No existing gitlab-runner service -- proceeding to install'
+        }
         & $Script:Config.RunnerBin install `
             --working-directory $Script:Config.RunnerDir `
             --config $Script:Config.ConfigToml 2>&1 |
@@ -278,13 +299,17 @@ log_level = "info"
 
     # Deploy new feature scripts
     foreach ($s in @(
-        @{ Key = $Script:Config.S3KeysExtra.ImportCerts;    File = 'Import-Certificates.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.EnableRemotePS; File = 'Enable-RemotePowerShell.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.NetMonitor;     File = 'Test-NetworkConnectivity.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.JobLog;         File = 'Write-JobLog.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.RdpAudit;       File = 'Export-RdpAuditLog.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.LogCollector;   File = 'Export-RunnerLogs.ps1' },
-        @{ Key = $Script:Config.S3KeysExtra.GoldenVersion;  File = 'Write-GoldenVersion.ps1' }
+        @{ Key = $Script:Config.S3KeysExtra.ImportCerts;          File = 'Import-Certificates.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.EnableRemoteSSH;      File = 'Enable-RemoteSSH.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.NetMonitor;           File = 'Test-NetworkConnectivity.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.JobLog;               File = 'Write-JobLog.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.RdpAudit;             File = 'Export-RdpAuditLog.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.LogCollector;         File = 'Export-RunnerLogs.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.GoldenVersion;        File = 'Write-GoldenVersion.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.InstallOpenCode;      File = 'Install-OpenCode.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.InstallTools;         File = 'Install-Tools.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.InstallObservability; File = 'Install-Observability.ps1' },
+        @{ Key = $Script:Config.S3KeysExtra.SetWtDefault;         File = 'Set-WindowsTerminalDefault.ps1' }
     )) {
         $outPath = Join-Path $Script:Config.ScriptsDir $s.File
         try {
@@ -324,47 +349,92 @@ log_level = "info"
         Register-InlineScheduledTask
     }
 
-    # -- 3.12 Deploy tools ------------------------------------
-    Write-Log '3.12 Deploy tools'
-    $winrarExe = Join-Path $Script:Config.ToolsDir 'winrar-x64-701.exe'
-    if (Get-S3Object -Key $Script:Config.S3Keys.WinRarExe -OutFile $winrarExe) {
-        Start-Process -FilePath $winrarExe -ArgumentList '/s' -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        Remove-Item $winrarExe -Force -ErrorAction SilentlyContinue
-        Write-Log 'WinRAR installed'
+    # -- 3.12 Install tools (table-driven) --------------------
+    # All tool installation is delegated to scripts/Install-Tools.ps1, which
+    # iterates $Script:Config.ToolPackages. Add a new tool by adding a row to
+    # that table; this step doesn't change.
+    Write-Log '3.12 Install tools (table-driven via Install-Tools.ps1)'
+    $installToolsScr = Join-Path $Script:Config.ScriptsDir 'Install-Tools.ps1'
+    if (Test-Path $installToolsScr) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installToolsScr 2>&1 |
+            ForEach-Object { Write-Log "  tools: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogWarn "Install-Tools.ps1 reported $LASTEXITCODE failures -- runner is still operational"
+        }
+    } else {
+        Write-LogWarn 'Install-Tools.ps1 not found -- skipping tool deployment'
     }
 
-    if (Install-S3Archive -S3Key $Script:Config.S3Keys.NssmZip -DestDir $Script:Config.ToolsDir -TestFile '' -Label 'NSSM') {
-        $nssmExe = Get-ChildItem -Path $Script:Config.ToolsDir -Recurse -Filter 'nssm.exe' |
-                   Where-Object { $_.FullName -like '*win64*' } | Select-Object -First 1
-        if ($nssmExe) { Copy-Item $nssmExe.FullName (Join-Path $Script:Config.ToolsDir 'nssm.exe') -Force }
+    # -- 3.13 OpenCode (WebView2 prereq + silent install + machine config) ---
+    # All real work lives in scripts/Install-OpenCode.ps1 -- here we only
+    # stage the binaries from S3 and invoke that script. Keeps Phase 3 small.
+    Write-Log '3.13 Install OpenCode (with WebView2 prerequisite)'
+
+    if (-not (Test-Path $Script:Config.WebView2StageDir)) {
+        New-Item -Path $Script:Config.WebView2StageDir -ItemType Directory -Force | Out-Null
+    }
+    if (-not (Test-Path $Script:Config.OpenCodeStageDir)) {
+        New-Item -Path $Script:Config.OpenCodeStageDir -ItemType Directory -Force | Out-Null
     }
 
-    foreach ($si in @(
-        @{ Key = $Script:Config.S3Keys.ProcExp; File = 'procexp64.exe' },
-        @{ Key = $Script:Config.S3Keys.ProcMon; File = 'Procmon64.exe' },
-        @{ Key = $Script:Config.S3Keys.Handle;  File = 'handle64.exe' }
-    )) { Get-S3Object -Key $si.Key -OutFile (Join-Path $Script:Config.SysInternalsDir $si.File) | Out-Null }
+    Get-S3Object -Key $Script:Config.S3KeysExtra.WebView2Exe    -OutFile $Script:Config.WebView2InstallerLocal | Out-Null
+    Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeExe    -OutFile $Script:Config.OpenCodeInstallerLocal | Out-Null
+    Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeConfig -OutFile $Script:Config.OpenCodeJsoncSource    | Out-Null
 
-    Install-S3Archive -S3Key $Script:Config.S3Keys.PsToolsZip -DestDir $Script:Config.SysInternalsDir -TestFile '' -Label 'PSTools' | Out-Null
-
-    # OpenCode -- installer + config
-    $openCodeExe = Join-Path $Script:Config.ToolsDir 'opencode-setup.exe'
-    if (Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeExe -OutFile $openCodeExe) {
-        Write-Log 'OpenCode installer downloaded (manual install later)'
+    $installOpenCodeScr = Join-Path $Script:Config.ScriptsDir 'Install-OpenCode.ps1'
+    if (Test-Path $installOpenCodeScr) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installOpenCodeScr `
+            -WebView2Installer    $Script:Config.WebView2InstallerLocal `
+            -OpenCodeInstaller    $Script:Config.OpenCodeInstallerLocal `
+            -OpenCodeConfigSource $Script:Config.OpenCodeJsoncSource `
+            -MachineConfigPath    $Script:Config.OpenCodeMachineFile 2>&1 |
+            ForEach-Object { Write-Log "  opencode: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogWarn "Install-OpenCode.ps1 exited $LASTEXITCODE -- runner is functional but OpenCode may not be."
+        }
+    } else {
+        Write-LogWarn 'Install-OpenCode.ps1 not found -- skipping OpenCode install'
     }
-    $openCodeConfig = Join-Path $env:USERPROFILE '.config\opencode.jsonc'
-    $openCodeConfigDir = Split-Path $openCodeConfig -Parent
-    if (-not (Test-Path $openCodeConfigDir)) { New-Item -Path $openCodeConfigDir -ItemType Directory -Force | Out-Null }
-    Get-S3Object -Key $Script:Config.S3KeysExtra.OpenCodeConfig -OutFile $openCodeConfig | Out-Null
 
-    Write-Log 'Tools deployed'
+    # -- 3.14 Install observability stack ---------------------
+    # windows_exporter (host metrics) + blackbox_exporter (probes) + firewall
+    # holes for runner :9252 and Docker :9323 metrics. Must run AFTER
+    # Install-Tools.ps1 because blackbox_exporter is registered as a service
+    # via NSSM, which Install-Tools provides.
+    Write-Log '3.14 Install observability stack'
+    $installObsScr = Join-Path $Script:Config.ScriptsDir 'Install-Observability.ps1'
+    if (Test-Path $installObsScr) {
+        $wxLocal = $Script:Config.ObservabilityPackages.WindowsExporter.LocalPath
+        $bbLocal = $Script:Config.ObservabilityPackages.BlackboxExporter.LocalPath
 
-    # -- 3.13 Final validation --------------------------------
+        # Stage installers from MinIO
+        if (-not (Test-Path (Split-Path $wxLocal))) { New-Item -Path (Split-Path $wxLocal) -ItemType Directory -Force | Out-Null }
+        if (-not (Test-Path (Split-Path $bbLocal))) { New-Item -Path (Split-Path $bbLocal) -ItemType Directory -Force | Out-Null }
+        Get-S3Object -Key $Script:Config.ObservabilityPackages.WindowsExporter.S3Key  -OutFile $wxLocal | Out-Null
+        Get-S3Object -Key $Script:Config.ObservabilityPackages.BlackboxExporter.S3Key -OutFile $bbLocal | Out-Null
+
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installObsScr `
+            -WindowsExporterMsi   $wxLocal `
+            -BlackboxExporterZip  $bbLocal `
+            -BlackboxInstallDir   $Script:Config.ObservabilityPackages.BlackboxExporter.InstallDir `
+            -WindowsExporterPort  $Script:Config.MetricsPorts.WindowsExporter `
+            -BlackboxExporterPort $Script:Config.MetricsPorts.BlackboxExporter `
+            -RunnerMetricsPort    $Script:Config.MetricsPorts.GitLabRunner `
+            -DockerMetricsPort    $Script:Config.MetricsPorts.Docker 2>&1 |
+            ForEach-Object { Write-Log "  obs: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogWarn "Install-Observability.ps1 exited $LASTEXITCODE -- check exporter logs"
+        }
+    } else {
+        Write-LogWarn 'Install-Observability.ps1 not found -- skipping observability stack'
+    }
+
+    # -- 3.15 Final validation --------------------------------
     Write-Log '========== FINAL VALIDATION =========='
     Invoke-FinalValidation
 
-    # -- 3.14 Write golden image version stamp -------------------
-    Write-Log '3.14 Write golden image version stamp'
+    # -- 3.16 Write golden image version stamp ----------------
+    Write-Log '3.16 Write golden image version stamp'
     $versionScript = Join-Path $Script:Config.ScriptsDir 'Write-GoldenVersion.ps1'
     if (Test-Path $versionScript) {
         & $versionScript `

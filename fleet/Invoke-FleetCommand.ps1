@@ -1,40 +1,25 @@
-﻿<#
+<#
 .SYNOPSIS
-    Fleet command runner -- execute a command across all runners via PSRemoting.
+    Fleet command runner -- execute a command across all runners via OpenSSH.
 
 .DESCRIPTION
-    Run this from your ADMIN PC (not on the runners).
-    Executes a script block on multiple runners in parallel and collects output.
+    Run this from your ADMIN PC (not on the runners). Executes a PowerShell
+    command on multiple runners in parallel via OpenSSH and collects output.
 
-    Prerequisites:
-      - WinRM enabled on all runners (Enable-RemotePowerShell.ps1)
-      - Your admin PC can reach runners on TCP 5985
+    Replaces the prior PSRemoting/WinRM transport, which is blocked at Kayhut
+    by domain GPO. OpenSSH is enabled on every runner by Phase 1 step 1.11.
 
-    Usage examples:
-
-      # Restart Docker on all runners
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command 'Restart-Service docker -Force'
-
-      # Flush DNS on all runners
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command 'Clear-DnsClientCache'
-
-      # Check disk space
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command '[math]::Round((Get-PSDrive C).Free/1GB,1)'
-
-      # Collect log bundles from all runners
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command 'C:\GitLab-Runner\scripts\Export-RunnerLogs.ps1'
-
-      # Kill stale Docker containers
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command 'docker container prune --force'
-
-      # Check golden version
-      .\Invoke-FleetCommand.ps1 -Runners runner01,runner02 -Command 'Get-Content C:\GitLab-Runner\.golden-version'
-
-      # Run from a file of hostnames
-      .\Invoke-FleetCommand.ps1 -Runners (Get-Content .\runners.txt) -Command 'hostname'
-
-      # Run a multi-line script block
-      .\Invoke-FleetCommand.ps1 -Runners runner01 -ScriptFile .\my-script.ps1
+    Auth (in order of preference):
+      1. SSH key auth -- pass -PrivateKey to use a specific identity file.
+         Public key must be in C:\ProgramData\ssh\administrators_authorized_keys
+         on each runner (if the user is in BUILTIN\Administrators) or
+         %USERPROFILE%\.ssh\authorized_keys (for non-admin accounts).
+      2. AD password auth -- if no key matches, ssh prompts per host. Domain
+         users on a domain-joined runner are validated by Windows logon
+         against the DC. Slow for fan-out (one prompt per host).
+      3. GSSAPI/Kerberos -- if your admin PC is domain-joined and you have a
+         current TGT, pass -KerberosAuth to skip both passwords and keys.
+         Requires the runner sshd_config to set GSSAPIAuthentication yes.
 
 .PARAMETER Runners
     Array of runner hostnames or IPs.
@@ -45,15 +30,25 @@
 .PARAMETER ScriptFile
     Path to a .ps1 file to execute on each runner (alternative to -Command).
 
-.PARAMETER Credential
-    PSCredential for authentication. If omitted, uses current user.
+.PARAMETER SshUser
+    Username for SSH login. Defaults to current user. For AD users, use
+    'DOMAIN\username' or 'username@domain.tld'.
+
+.PARAMETER PrivateKey
+    Path to an SSH private key (e.g. ~/.ssh/id_ed25519). Skips password prompt.
+
+.PARAMETER KerberosAuth
+    Use GSSAPI/Kerberos auth (passwordless on a domain-joined admin PC with a
+    current TGT). Requires runner sshd_config: GSSAPIAuthentication yes.
 
 .PARAMETER ThrottleLimit
-    Max concurrent connections. Default: 10.
+    Max concurrent SSH connections. Default: 10.
 
 .NOTES
     File: fleet/Invoke-FleetCommand.ps1
-    Runs on: Admin PC (NOT on runners)
+    Runs on: Admin PC (NOT on runners). Requires ssh.exe on PATH (Windows 10+
+    has OpenSSH client by default; otherwise install OpenSSH client optional
+    feature or use Git for Windows' bundled ssh).
 #>
 
 param(
@@ -66,74 +61,75 @@ param(
     [Parameter(ParameterSetName='ScriptFile')]
     [string]$ScriptFile,
 
-    [PSCredential]$Credential,
+    [string]$SshUser,
+    [string]$PrivateKey,
+    [switch]$KerberosAuth,
 
     [int]$ThrottleLimit = 10
 )
 
 $ErrorActionPreference = 'Continue'
 
-# -- Validate input -------------------------------------------
 if (-not $Command -and -not $ScriptFile) {
     Write-Error 'Provide either -Command or -ScriptFile'
     return
 }
-
 if ($ScriptFile) {
-    if (-not (Test-Path $ScriptFile)) {
-        Write-Error "Script file not found: $ScriptFile"
-        return
-    }
-    $scriptContent = Get-Content $ScriptFile -Raw
-    $scriptBlock   = [ScriptBlock]::Create($scriptContent)
+    if (-not (Test-Path $ScriptFile)) { Write-Error "Script file not found: $ScriptFile"; return }
+    $payload = Get-Content $ScriptFile -Raw
 } else {
-    $scriptBlock = [ScriptBlock]::Create($Command)
+    $payload = $Command
 }
 
-# -- Display intent -------------------------------------------
+# UTF-16LE base64 -- powershell.exe -EncodedCommand expects exactly this.
+$bytes = [System.Text.Encoding]::Unicode.GetBytes($payload)
+$b64   = [Convert]::ToBase64String($bytes)
+
+$baseArgs = @(
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'UserKnownHostsFile=~/.ssh/fleet_known_hosts',
+    '-o', 'BatchMode=no',
+    '-o', 'ConnectTimeout=10'
+)
+if ($PrivateKey)   { $baseArgs += @('-i', $PrivateKey) }
+if ($KerberosAuth) { $baseArgs += @('-o', 'GSSAPIAuthentication=yes', '-o', 'GSSAPIDelegateCredentials=yes') }
+
 $cmdDisplay = if ($ScriptFile) { "ScriptFile: $ScriptFile" } else { $Command }
-Write-Output "`n  Targets: $($Runners -join ', ')"
-Write-Output "  Command: $cmdDisplay"
+Write-Output ''
+Write-Output "  Targets : $($Runners -join ', ')"
+Write-Output "  Command : $cmdDisplay"
 Write-Output "  Throttle: $ThrottleLimit"
+if ($PrivateKey)        { Write-Output "  Auth    : SSH key ($PrivateKey)" }
+elseif ($KerberosAuth)  { Write-Output '  Auth    : Kerberos (GSSAPI)' }
+else                    { Write-Output '  Auth    : password (will prompt per host)' }
 Write-Output ''
 
-# -- Execute --------------------------------------------------
-$invokeParams = @{
-    ComputerName  = $Runners
-    ScriptBlock   = $scriptBlock
-    ErrorAction   = 'SilentlyContinue'
-    ErrorVariable = 'remoteErrors'
-    ThrottleLimit = $ThrottleLimit
-}
-if ($Credential) { $invokeParams.Credential = $Credential }
-
-$results = Invoke-Command @invokeParams
-
-# -- Display results grouped by host --------------------------
-if ($results) {
-    $grouped = $results | Group-Object -Property PSComputerName
-    foreach ($group in $grouped) {
-        Write-Output "--- $($group.Name) ---"
-        $group.Group | ForEach-Object {
-            # Strip PSComputerName from output if it's a simple value
-            if ($_ -is [PSCustomObject] -or $_ -is [hashtable]) {
-                $_ | Format-Table -AutoSize | Out-String | Write-Output
-            } else {
-                Write-Output "  $_"
-            }
+$jobs = @()
+foreach ($runner in $Runners) {
+    $target = if ($SshUser) { "$SshUser@$runner" } else { $runner }
+    $jobs += Start-Job -Name $runner -ArgumentList $target,$baseArgs,$b64 -ScriptBlock {
+        param($Target, $BaseArgs, $EncodedPayload)
+        $sshArgs = $BaseArgs + @($Target, 'powershell.exe', '-NoProfile', '-EncodedCommand', $EncodedPayload)
+        $stdout = & ssh @sshArgs 2>&1
+        $exitCode = $LASTEXITCODE
+        [PSCustomObject]@{
+            Output   = ($stdout -join "`n")
+            ExitCode = $exitCode
         }
     }
+    while (@(Get-Job -State Running).Count -ge $ThrottleLimit) { Start-Sleep -Milliseconds 200 }
 }
 
-# -- Report unreachable hosts ---------------------------------
-$reached = @()
-if ($results) {
-    $reached = $results | Select-Object -ExpandProperty PSComputerName -Unique
-}
-$unreachable = $Runners | Where-Object { $_ -notin $reached }
+$reached = 0
+foreach ($job in $jobs) {
+    Wait-Job -Job $job | Out-Null
+    $r = Receive-Job -Job $job
+    Remove-Job -Job $job
 
-if ($unreachable.Count -gt 0) {
-    Write-Output "`n  UNREACHABLE: $($unreachable -join ', ')"
+    Write-Output "--- $($job.Name) (exit $($r.ExitCode)) ---"
+    Write-Output $r.Output
+    Write-Output ''
+    if ($r.ExitCode -eq 0) { $reached++ }
 }
 
-Write-Output "`n  Done: $($reached.Count)/$($Runners.Count) runners responded."
+Write-Output "  Done: $reached/$($Runners.Count) runners returned exit 0."

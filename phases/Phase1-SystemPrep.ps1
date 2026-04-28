@@ -15,7 +15,13 @@
     1.6  Environment variables + PATH
     1.7  Create directory structure
     1.8  Increase Event Log sizes
-    1.9  Install Windows Features (Containers + Hyper-V)
+    1.9  Install Windows Features (Containers always, Hyper-V iff host
+         exposes nested virtualization; a marker file persists the skip
+         decision across the upcoming reboot)
+    1.10 Import self-signed certificates
+    1.11 Enable OpenSSH server (remote control plane; replaces the prior
+         WinRM step which was blocked by domain GPO)
+    1.12 Enable RDP audit policy
 
     Reboots via Be1 if features required it, otherwise continues to Phase 2.
 
@@ -135,12 +141,37 @@ function Invoke-Phase1 {
         if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
     } else { Write-Log 'Containers: already installed' }
 
+    # Hyper-V requires hardware virtualization (VT-x/AMD-V) exposed by the
+    # hypervisor. On VMware, this is the per-VM "Expose hardware assisted
+    # virtualization to the guest OS" setting (nested virt). When absent,
+    # Install-WindowsFeature fails the prerequisite check. Process isolation
+    # does NOT need Hyper-V, so we skip gracefully and the runner continues
+    # on process isolation only -- writing a marker file so validation in
+    # Phase 3 (different process after reboot) knows the skip was deliberate.
     $hypervFeature = Get-WindowsFeature -Name Hyper-V
-    if (-not $hypervFeature.Installed) {
-        Write-Log 'Installing Hyper-V feature...'
-        $result = Install-WindowsFeature -Name Hyper-V -IncludeManagementTools
-        if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
-    } else { Write-Log 'Hyper-V: already installed' }
+    if ($hypervFeature.Installed) {
+        Write-Log 'Hyper-V: already installed'
+        if (Test-Path $Script:Config.HyperVSkippedMarker) {
+            Remove-Item $Script:Config.HyperVSkippedMarker -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+        $vtExposed = [bool]$cpu.VirtualizationFirmwareEnabled -or [bool]$cpu.VMMonitorModeExtensions
+        if (-not $vtExposed) {
+            Write-LogWarn 'Hyper-V SKIPPED: CPU does not expose hardware virtualization (host-side nested-virt setting).'
+            Write-LogWarn '  Runner will operate with docker-windows process isolation only (which does NOT need Hyper-V).'
+            Write-LogWarn '  To enable Hyper-V isolation later: enable "Expose hardware assisted virtualization to the guest OS" on the VM in vSphere/Be1 template, then re-run this phase.'
+            "skipped at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -- VT-x not exposed by host" |
+                Out-File -FilePath $Script:Config.HyperVSkippedMarker -Encoding UTF8 -Force
+        } else {
+            Write-Log 'Installing Hyper-V feature...'
+            $result = Install-WindowsFeature -Name Hyper-V -IncludeManagementTools
+            if ($result.RestartNeeded -eq 'Yes') { $needReboot = $true }
+            if (Test-Path $Script:Config.HyperVSkippedMarker) {
+                Remove-Item $Script:Config.HyperVSkippedMarker -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 
     # -- 1.10 Import self-signed certificates -----------------
     Write-Log '1.10 Import self-signed certificates'
@@ -156,18 +187,49 @@ function Invoke-Phase1 {
         Write-LogWarn 'Import-Certificates.ps1 not found -- skipping cert import'
     }
 
-    # -- 1.11 Enable WinRM (remote PowerShell) ----------------
-    Write-Log '1.11 Enable WinRM for remote PowerShell'
-    # Download script from S3 first (Phase 3 not yet run on fresh VM)
-    $winrmScript = Join-Path $Script:Config.ScriptsDir 'Enable-RemotePowerShell.ps1'
-    if (-not (Test-Path $winrmScript)) {
-        Write-Log '  Fetching Enable-RemotePowerShell.ps1 from S3...'
-        Get-S3Object -Key $Script:Config.S3KeysExtra.EnableRemotePS -OutFile $winrmScript | Out-Null
+    # -- 1.11 Enable OpenSSH (remote control plane) -----------
+    # Replaces the prior WinRM step. WinRM is blocked at Kayhut by domain GPO
+    # (Set-Service / Restart-Service on the WinRM service raise "Access is
+    # denied" even from local admins). OpenSSH is installed from a portable
+    # zip release of PowerShell/Win32-OpenSSH; no Add-WindowsCapability call,
+    # no BITS, no internet -- works fully air-gapped.
+    #
+    # Auth model: AD password auth is the PRIMARY mechanism on a domain-joined
+    # runner. sshd hands password attempts to the Windows logon stack which
+    # validates against the domain controller. A public-key fallback is
+    # optionally seeded from administrators_authorized_keys (skipped if the
+    # file isn't staged in MinIO).
+    Write-Log '1.11 Enable OpenSSH server (remote control plane)'
+
+    # Stage zip + authorized_keys from MinIO into C:\Tools\openssh\
+    if (-not (Test-Path $Script:Config.OpenSshStageDir)) {
+        New-Item -Path $Script:Config.OpenSshStageDir -ItemType Directory -Force | Out-Null
     }
-    if (Test-Path $winrmScript) {
-        & $winrmScript 2>&1 | ForEach-Object { Write-Log "  winrm: $_" }
+    if (-not (Test-Path $Script:Config.OpenSshZipLocal)) {
+        Write-Log '  Fetching OpenSSH-Win64.zip from S3...'
+        Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshZip -OutFile $Script:Config.OpenSshZipLocal | Out-Null
+    }
+    if (-not (Test-Path $Script:Config.OpenSshAuthKeysSource)) {
+        Write-Log '  Fetching administrators_authorized_keys from S3 (optional)...'
+        Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshAuthKeys -OutFile $Script:Config.OpenSshAuthKeysSource | Out-Null
+    }
+
+    # Stage the SSH-enable script
+    $sshScript = Join-Path $Script:Config.ScriptsDir 'Enable-RemoteSSH.ps1'
+    if (-not (Test-Path $sshScript)) {
+        Write-Log '  Fetching Enable-RemoteSSH.ps1 from S3...'
+        Get-S3Object -Key $Script:Config.S3KeysExtra.EnableRemoteSSH -OutFile $sshScript | Out-Null
+    }
+    if (Test-Path $sshScript) {
+        & $sshScript `
+            -OpenSshZip           $Script:Config.OpenSshZipLocal `
+            -InstallDir           $Script:Config.OpenSshInstallDir `
+            -AuthorizedKeysSource $Script:Config.OpenSshAuthKeysSource `
+            -FirewallRuleName     $Script:Config.OpenSshFirewallRule `
+            -AllowedADGroups      $Script:Config.OpenSshAllowedADGroups 2>&1 |
+            ForEach-Object { Write-Log "  ssh: $_" }
     } else {
-        Write-LogWarn 'Enable-RemotePowerShell.ps1 not found -- skipping WinRM setup'
+        Write-LogWarn 'Enable-RemoteSSH.ps1 not found -- skipping SSH setup'
     }
 
     # -- 1.12 Enable RDP audit policy -------------------------

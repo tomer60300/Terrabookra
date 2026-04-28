@@ -15,10 +15,11 @@
     File: validation/Invoke-FinalValidation.ps1
     Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
 
-    Checks:
+    Checks (fixed-position):
       1   OS Build = 17763
       2   Containers feature installed
-      3   Hyper-V feature installed
+      3   Hyper-V feature installed OR intentionally skipped (no VT-x exposed
+          by host -- Phase 1 wrote a marker file)
       4   Docker service running
       5   Docker version = 25.0.x
       6   Docker isolation = process
@@ -29,10 +30,26 @@
       11  GIT_SSL_NO_VERIFY set
       12  Defender exclusions applied
       13  Helper image present
-      14  Scheduled tasks >= 8
+      14  Scheduled tasks >= 10
       15  Power plan = High Performance
       16  Long paths enabled
-      17  Disk free >= 50 GB
+      17  Disk free C: >= 50 GB
+      18  Disk free E: >= 50 GB (when E: present)
+
+    Checks (auto-generated from $Config.ToolPackages -- one per tool):
+      19+ Tool: WinRAR / NSSM / Sysinternals / Notepad++ / WinMerge /
+          BareTail / Klogg / Everything / WizTree / SystemInformer /
+          EventLook / Wireshark+tshark / Chrome / WindowsTerminal
+
+    Checks (observability stack):
+      sshd service running (remote control plane -- replaces WinRM)
+      windows_exporter service running (Prometheus host metrics on :9182)
+      blackbox_exporter service running (Prometheus probes on :9115)
+      Runner metrics firewall hole (TCP 9252)
+      Docker metrics-addr present in daemon.json (TCP 9323)
+      WebView2 runtime installed
+      OpenCode machine config file present
+      OPENCODE_CONFIG env var points at machine config
 #>
 
 function Invoke-FinalValidation {
@@ -50,7 +67,13 @@ function Invoke-FinalValidation {
 
     Check 'OS Build = 17763'            { [System.Environment]::OSVersion.Version.Build -eq 17763 }
     Check 'Containers feature'          { (Get-WindowsFeature Containers).Installed }
-    Check 'Hyper-V feature'             { (Get-WindowsFeature Hyper-V).Installed }
+    # Hyper-V is installed only when the host exposes nested virtualization.
+    # When skipped intentionally (no VT-x), Phase 1 leaves a marker file --
+    # an in-memory variable wouldn't survive the Phase 1 -> Phase 3 reboot.
+    Check 'Hyper-V feature OR skipped'  {
+        (Get-WindowsFeature Hyper-V).Installed -or
+        (Test-Path $Script:Config.HyperVSkippedMarker)
+    }
     Check 'Docker service running'      { (Get-Service docker -ErrorAction SilentlyContinue).Status -eq 'Running' }
     Check 'Docker version = 25.0'       { (docker version --format '{{.Server.Version}}' 2>$null) -match '25\.0' }
     Check 'Docker isolation = process'  { (docker info --format '{{.Isolation}}' 2>$null) -eq 'process' }
@@ -69,6 +92,42 @@ function Invoke-FinalValidation {
     $dd = if (Test-Path 'E:\') { 'E' } else { $null }
     if ($dd) {
     Check "Disk free ${dd}: >= 50 GB"    { [math]::Round((Get-PSDrive $dd).Free / 1GB) -ge 50 }
+    }
+
+    # -- Tool inventory: one validation check per row in $Config.ToolPackages.
+    # New tools added to the table automatically appear in validation -- no
+    # edits needed here.
+    if ($Script:Config.ToolPackages) {
+        foreach ($t in $Script:Config.ToolPackages) {
+            $detect = $t.Detect
+            Check ("Tool: $($t.Name)")      { & $detect } | Out-Null
+        }
+    }
+
+    # -- Remote control plane -- OpenSSH server (replaces WinRM)
+    Check 'sshd service running'        { (Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running' }
+
+    # -- Observability stack: exporters + metrics endpoints
+    Check 'windows_exporter service'    { (Get-Service windows_exporter  -EA SilentlyContinue).Status -eq 'Running' }
+    Check 'blackbox_exporter service'   { (Get-Service blackbox_exporter -EA SilentlyContinue).Status -eq 'Running' }
+    Check 'Runner metrics firewall'     {
+        [bool](Get-NetFirewallRule -Name 'GitLabRunnerMetrics-In-TCP' -EA SilentlyContinue)
+    }
+    Check 'Docker metrics in daemon.json' {
+        (Get-Content $Script:Config.DaemonJson -Raw -EA SilentlyContinue) -match 'metrics-addr'
+    }
+
+    # -- OpenCode + WebView2 -- machine-wide config plumbing
+    Check 'WebView2 installed'          {
+        @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+          'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') |
+            Where-Object { Test-Path $_ } | Select-Object -First 1 |
+            ForEach-Object { (Get-ItemProperty -Path $_ -Name pv -EA SilentlyContinue).pv } |
+            Where-Object { $_ }
+    }
+    Check 'OpenCode machine config'     { Test-Path $Script:Config.OpenCodeMachineFile }
+    Check 'OPENCODE_CONFIG env var'     {
+        [System.Environment]::GetEnvironmentVariable('OPENCODE_CONFIG','Machine') -eq $Script:Config.OpenCodeMachineFile
     }
 
     Write-Log "Validation: $pass/$total passed, $fail failed"

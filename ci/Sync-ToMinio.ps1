@@ -92,12 +92,23 @@ $FileMap = [ordered]@{
     'scripts/kill-stale-containers.ps1'        = 'scripts/kill-stale-containers.ps1'
     'scripts/Register-ScheduledTasks.ps1'      = 'scripts/Register-ScheduledTasks.ps1'
     'scripts/Import-Certificates.ps1'          = 'scripts/Import-Certificates.ps1'
-    'scripts/Enable-RemotePowerShell.ps1'      = 'scripts/Enable-RemotePowerShell.ps1'
+    # Enable-RemoteSSH.ps1 replaces the old Enable-RemotePowerShell.ps1.
+    # WinRM is blocked by domain GPO so we switched the remote-control plane
+    # to OpenSSH. The old key is intentionally absent here; if any stale copy
+    # remains in MinIO, it's harmless dead bytes (no script reads it anymore).
+    'scripts/Enable-RemoteSSH.ps1'             = 'scripts/Enable-RemoteSSH.ps1'
     'scripts/Test-NetworkConnectivity.ps1'     = 'scripts/Test-NetworkConnectivity.ps1'
     'scripts/Write-JobLog.ps1'                 = 'scripts/Write-JobLog.ps1'
     'scripts/Export-RdpAuditLog.ps1'           = 'scripts/Export-RdpAuditLog.ps1'
     'scripts/Export-RunnerLogs.ps1'            = 'scripts/Export-RunnerLogs.ps1'
     'scripts/Write-GoldenVersion.ps1'          = 'scripts/Write-GoldenVersion.ps1'
+    # Phase 3 helpers added in 2.4.0 (table-driven tool installer, OpenCode +
+    # WebView2 silent installer, observability stack installer, Windows
+    # Terminal default-shell setup).
+    'scripts/Install-Tools.ps1'                = 'scripts/Install-Tools.ps1'
+    'scripts/Install-OpenCode.ps1'             = 'scripts/Install-OpenCode.ps1'
+    'scripts/Install-Observability.ps1'        = 'scripts/Install-Observability.ps1'
+    'scripts/Set-WindowsTerminalDefault.ps1'   = 'scripts/Set-WindowsTerminalDefault.ps1'
 
     # --- tools (config files only -- binaries are uploaded manually) ---
     'tools/opencode/opencode.jsonc'            = 'tools/opencode/opencode.jsonc'
