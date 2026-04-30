@@ -25,9 +25,25 @@
 #
 # Setup (one-time):
 #   1. Go to Settings > CI/CD > Variables (masked + protected):
-#        MINIO_ENDPOINT    = https://<real-minio-host>:9000
-#        MINIO_ACCESS_KEY  = MinIO access key
-#        MINIO_SECRET_KEY  = MinIO secret key
+#        MINIO_ENDPOINT      = https://<real-minio-host>:9000
+#        MINIO_ACCESS_KEY    = MinIO access key
+#        MINIO_SECRET_KEY    = MinIO secret key
+#
+#      ALIAS SUBSTITUTION (optional but recommended -- lets the public repo
+#      hold aliases while internal CI publishes real hostnames to MinIO):
+#        REAL_HARBOR_HOST    = <real Harbor FQDN>      (replaces 'harbor.kayhut.com')
+#        REAL_GITLAB_HOST    = <real GitLab FQDN>      (replaces 'gitlab.kayhut.com')
+#        REAL_MINIO_HOST     = <real MinIO FQDN>       (replaces 'kayhut-minio.com')
+#        REAL_BE1_HOST       = <real Be1 FQDN>         (replaces 'be1.kayhut.com')
+#        REAL_PROJECT_NAME   = <internal project name> (replaces 'Terrabookra' /
+#                                                       'terrabookra')
+#
+#      Substitution is opt-in: if a REAL_* var is unset, the corresponding
+#      alias passes through unchanged. Logic lives in ci/Substitute-Aliases.ps1
+#      and runs identically in sync-to-minio (rewrites bytes before PUT) and
+#      verify-minio (rewrites local bytes before MD5 compare, so content-match
+#      still works).
+#
 #   2. Ensure the runner tag matches your Windows runner
 
 stages:

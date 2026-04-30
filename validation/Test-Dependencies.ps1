@@ -111,6 +111,22 @@ if (Test-Path $mapPath) {
     Write-Host "  WARN: ci/FileMap.ps1 not found -- content-match check will be skipped" -ForegroundColor Yellow
 }
 
+# Optional: source the alias-substitution helper. When CI env vars REAL_* are
+# set, Sync-ToMinio.ps1 rewrites file content before upload -- so to keep the
+# MD5 content-match check working, we have to apply the SAME substitution to
+# the local bytes before hashing. If the helper isn't on disk (e.g. on a
+# runner where ci/ isn't deployed), define a passthrough stub.
+$subPath = if ($mapPath) { Join-Path (Split-Path $mapPath) 'Substitute-Aliases.ps1' } else { $null }
+if ($subPath -and (Test-Path $subPath)) {
+    . $subPath
+    if (Test-AliasSubstitutionActive) {
+        Write-Host "  Alias substitution: ACTIVE -- local content will be rewritten before MD5" -ForegroundColor DarkGray
+    }
+} else {
+    function Convert-Aliases { param([byte[]]$ContentBytes) ; ,$ContentBytes }
+    function Test-AliasSubstitutionActive { $false }
+}
+
 # ============================================================
 # RESULT TRACKING
 # ============================================================
@@ -322,7 +338,14 @@ if (-not $SkipS3) {
                         -Detail "skipped (multipart upload, ETag opaque: $remoteEtag)"
                 }
                 else {
-                    $localMd5 = (Get-FileHash -Algorithm MD5 -Path $localFull).Hash.ToLower()
+                    # Read the local bytes, apply alias substitution (no-op
+                    # when REAL_* env vars are unset), then MD5. Sync-ToMinio
+                    # ran the same substitution before upload, so MinIO's
+                    # ETag is MD5 over the substituted bytes -- this matches.
+                    $localBytes = [System.IO.File]::ReadAllBytes($localFull)
+                    $localBytes = Convert-Aliases -ContentBytes $localBytes
+                    $md5        = [System.Security.Cryptography.MD5]::Create()
+                    $localMd5   = [System.BitConverter]::ToString($md5.ComputeHash($localBytes)).Replace('-','').ToLower()
                     if ($localMd5 -eq $remoteEtag.ToLower()) {
                         Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
                             -Detail "MD5=$($localMd5.Substring(0,12))..."

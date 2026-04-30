@@ -6,6 +6,41 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.2] -- 2026-04-30
+
+### Added
+
+- **Alias auto-substitution at sync time** (`ci/Substitute-Aliases.ps1`).
+  Internal GitLab CI can now provide real hostnames as masked CI variables
+  and the sync pipeline rewrites file content in-flight, so MinIO ends up
+  holding real internal FQDNs while the public repo continues to hold
+  `kayhut.com` / `Terrabookra` aliases. Removes the need to maintain a
+  separate de-aliased internal mirror of the source code.
+  - **New CI variables (all optional):** `REAL_HARBOR_HOST`,
+    `REAL_GITLAB_HOST`, `REAL_MINIO_HOST`, `REAL_BE1_HOST`,
+    `REAL_PROJECT_NAME`.
+  - When set, every text file uploaded to MinIO has its aliases replaced
+    (binary files / NUL-containing content are passed through unchanged).
+  - When unset, files upload verbatim. Public-side users see no change.
+- **`verify-minio` is substitution-aware.** `Test-Dependencies.ps1` sources
+  the same `Substitute-Aliases.ps1` helper and applies it to local bytes
+  before computing the MD5 used in the ETag content-match check. The
+  result: MD5(local-substituted) == ETag(remote-substituted), so the
+  content-match gate still passes when substitution is active.
+  - On a runner (where `ci/` isn't deployed), `Convert-Aliases` falls back
+    to a passthrough stub so the script still works for pre-flight checks.
+
+### Why
+
+The previous setup required two repos: a public one with aliases and an
+internal mirror with real hostnames hardcoded in source. Keeping them in
+sync was error-prone, especially after the 2.4.0 refactor that touched
+many files. This change makes the public repo the single source of truth;
+the internal CI's job is to inject real values from environment variables
+at upload time.
+
+---
+
 ## [2.4.1] -- 2026-04-30
 
 ### Added

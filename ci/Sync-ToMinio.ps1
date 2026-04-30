@@ -69,6 +69,7 @@ public class TrustAllCerts {
 # ============================================================
 
 . (Join-Path $PSScriptRoot 'FileMap.ps1')
+. (Join-Path $PSScriptRoot 'Substitute-Aliases.ps1')
 
 # ============================================================
 # S3 PUT (AWS Signature V4)
@@ -85,6 +86,11 @@ function Put-S3Object {
     if ($uri.Port -ne 443 -and $uri.Port -ne 80) { $hostName = "$($uri.Host):$($uri.Port)" }
 
     $fileBytes   = [System.IO.File]::ReadAllBytes($FilePath)
+    # Apply alias->real substitution (no-op when REAL_* env vars are unset).
+    # Must happen BEFORE the SHA256 + ETag derivation -- MinIO's ETag is
+    # MD5(content-as-uploaded), so verify-minio's MD5 has to match what
+    # actually went over the wire, not what was on disk.
+    $fileBytes   = Convert-Aliases -ContentBytes $fileBytes
     $payloadHash = [System.BitConverter]::ToString(
         [System.Security.Cryptography.SHA256]::Create().ComputeHash($fileBytes)
     ).Replace('-','').ToLower()
@@ -145,6 +151,14 @@ Write-Output "============================================"
 Write-Output "Sync-ToMinio -- $Endpoint/$Bucket"
 Write-Output "Repo root: $repoRoot"
 Write-Output "Files to sync: $($FileMap.Count)"
+if (Test-AliasSubstitutionActive) {
+    Write-Output "Alias substitution: ACTIVE (file content will be rewritten before upload)"
+    foreach ($s in (Get-ActiveSubstitutions)) {
+        Write-Output ("  {0,-22} -> {1} (from `$env:{2})" -f $s.Alias, $s.Real, $s.Env)
+    }
+} else {
+    Write-Output "Alias substitution: inactive (no REAL_* env vars set; content uploaded verbatim)"
+}
 if ($DryRun) { Write-Output "MODE: DRY RUN" }
 Write-Output "============================================"
 
