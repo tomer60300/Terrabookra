@@ -6,6 +6,31 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.1] -- 2026-04-30
+
+### Added
+
+- **`verify-minio` content-match upgrade** -- `validation/Test-Dependencies.ps1`
+  now compares the **MD5 of every local repo file** to the **ETag returned by
+  MinIO** for the matching S3 object. S3/MinIO ETag for single-PUT uploads
+  (which `Sync-ToMinio.ps1` always uses) IS the MD5 of the content, so this
+  catches both missing keys *and* stale/corrupt blobs at the right key. No
+  extra round-trips beyond the existing HEAD; ~1 ms of MD5 compute per file.
+- **`ci/FileMap.ps1`** -- shared single source of truth for the
+  `repo-path -> S3-key` mapping. Both `ci/Sync-ToMinio.ps1` (uploads) and
+  `validation/Test-Dependencies.ps1` (content-match) dot-source it, so the
+  two scripts can never drift on which keys go where.
+
+### Changed
+
+- **`validation/Test-Dependencies.ps1`** report category extended:
+  - `S3` rows = HEAD existence check (unchanged).
+  - **`S3-Content`** rows = new MD5/ETag content-match per key.
+  - Skipped gracefully for keys with no local file (binary tools uploaded
+    out-of-band via USB) or for multipart uploads (ETag opaque).
+
+---
+
 ## [2.4.0] -- 2026-04-28
 
 Major feature release: new operator tool inventory, observability stack,

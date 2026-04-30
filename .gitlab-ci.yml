@@ -10,10 +10,13 @@
 #                                    "Terrabookra" name)
 #   stage 2 -- sync-to-minio       : ci/Sync-ToMinio.ps1 walks the $FileMap
 #                                    and uploads each file via AWS SigV4
-#   stage 3 -- verify-minio        : validation/Test-Dependencies.ps1 HEAD-
-#                                    checks every S3 key + Harbor manifest
-#                                    so missing/forgotten keys fail in CI
-#                                    rather than at first runner provision
+#   stage 3 -- verify-minio        : validation/Test-Dependencies.ps1 does
+#                                    three checks: DNS resolution, S3 HEAD
+#                                    (key exists), and S3 content-match
+#                                    (MD5 of local repo file == ETag of the
+#                                    MinIO object, single-PUT only). Catches
+#                                    both missing keys AND stale/corrupt
+#                                    blobs at the right key.
 #
 # Source of truth for what gets synced: ci/Sync-ToMinio.ps1 $FileMap. Adding
 # a new lib/phase/script file requires (a) creating it under the right repo

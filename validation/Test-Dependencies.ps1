@@ -87,6 +87,31 @@ public class TrustAllCerts {
 [TrustAllCerts]::Enable()
 
 # ============================================================
+# FILE MAP -- inverse lookup (S3 key -> repo path) so the content-match
+# check can compute the local MD5 for each S3 key. Sourced from the same
+# ci/FileMap.ps1 file Sync-ToMinio.ps1 uses, so they can never drift.
+# Repo files NOT in $FileMap (e.g. binary tools uploaded out-of-band via
+# USB) get a HEAD existence check only, no MD5 comparison.
+# ============================================================
+
+$Script:S3KeyToRepoPath = @{}
+$mapPath = Join-Path (Split-Path $Script:Config.PSScriptRoot -ErrorAction SilentlyContinue) 'ci\FileMap.ps1'
+if (-not (Test-Path $mapPath)) {
+    # Try walking up from this script's location: validation/ -> repo root -> ci/
+    $repoRoot = Split-Path $PSScriptRoot -Parent
+    $mapPath = Join-Path $repoRoot 'ci\FileMap.ps1'
+}
+if (Test-Path $mapPath) {
+    . $mapPath
+    foreach ($entry in $Script:FileMap.GetEnumerator()) {
+        $Script:S3KeyToRepoPath[$entry.Value] = $entry.Key
+    }
+    Write-Host "  Loaded FileMap from $mapPath ($($Script:S3KeyToRepoPath.Count) entries)" -ForegroundColor DarkGray
+} else {
+    Write-Host "  WARN: ci/FileMap.ps1 not found -- content-match check will be skipped" -ForegroundColor Yellow
+}
+
+# ============================================================
 # RESULT TRACKING
 # ============================================================
 
@@ -227,9 +252,11 @@ if (-not $SkipS3) {
             $contentLen  = $response.ContentLength
             $response.Close()
 
+            $etag = ($response.Headers['ETag'])
             return @{
                 StatusCode  = $statusCode
                 Size        = $contentLen
+                ETag        = $etag
                 Error       = ''
             }
         }
@@ -238,14 +265,18 @@ if (-not $SkipS3) {
             if ($webEx.Response) {
                 $statusCode = [int]$webEx.Response.StatusCode
                 $webEx.Response.Close()
-                return @{ StatusCode = $statusCode; Size = -1; Error = "HTTP $statusCode" }
+                return @{ StatusCode = $statusCode; Size = -1; ETag = $null; Error = "HTTP $statusCode" }
             }
-            return @{ StatusCode = 0; Size = -1; Error = $webEx.Message }
+            return @{ StatusCode = 0; Size = -1; ETag = $null; Error = $webEx.Message }
         }
         catch {
-            return @{ StatusCode = 0; Size = -1; Error = $_.Exception.Message }
+            return @{ StatusCode = 0; Size = -1; ETag = $null; Error = $_.Exception.Message }
         }
     }
+
+    # Repo root (where ci/ and lib/ live) -- needed to resolve local paths
+    # for the MD5 content-match check.
+    $repoRoot = Split-Path $PSScriptRoot -Parent
 
     foreach ($key in ($allS3Keys | Sort-Object)) {
         $result = Send-S3Head -Key $key
@@ -258,6 +289,49 @@ if (-not $SkipS3) {
                 "$($result.Size) B"
             }
             Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $true -Detail $sizeStr
+
+            # --- Content-match check via ETag (S3/MinIO ETag = MD5(content) for
+            # single-PUT uploads, which Sync-ToMinio.ps1 always uses).
+            # Skip when:
+            #   - the S3 key has no corresponding local file in $FileMap
+            #     (binary tools uploaded out-of-band via USB),
+            #   - the ETag header was missing (unlikely with MinIO),
+            #   - the ETag contains "-" indicating a multipart upload
+            #     (defensive: opaque hash, can't compare).
+            if ($Script:S3KeyToRepoPath.Count -gt 0 -and
+                $Script:S3KeyToRepoPath.ContainsKey($key)) {
+
+                $localRel  = $Script:S3KeyToRepoPath[$key]
+                $localFull = Join-Path $repoRoot $localRel
+                $remoteEtag = $result.ETag
+                if ($remoteEtag) {
+                    $remoteEtag = $remoteEtag.Trim('"').Trim()
+                }
+
+                if (-not (Test-Path $localFull)) {
+                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $false `
+                        -Detail "local file missing: $localRel"
+                }
+                elseif (-not $remoteEtag) {
+                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                        -Detail 'skipped (no ETag header)'
+                }
+                elseif ($remoteEtag -match '-') {
+                    # Multipart upload -- ETag is opaque <md5-of-md5s>-<parts>
+                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                        -Detail "skipped (multipart upload, ETag opaque: $remoteEtag)"
+                }
+                else {
+                    $localMd5 = (Get-FileHash -Algorithm MD5 -Path $localFull).Hash.ToLower()
+                    if ($localMd5 -eq $remoteEtag.ToLower()) {
+                        Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                            -Detail "MD5=$($localMd5.Substring(0,12))..."
+                    } else {
+                        Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $false `
+                            -Detail "MD5 mismatch: local=$($localMd5.Substring(0,12))... remote=$($remoteEtag.Substring(0,[Math]::Min(12,$remoteEtag.Length)))..."
+                    }
+                }
+            }
         }
         else {
             Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $false -Detail $result.Error

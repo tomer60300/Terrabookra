@@ -65,54 +65,10 @@ public class TrustAllCerts {
 
 # ============================================================
 # FILE MAP -- repo path -> S3 object key
-# Single source of truth for what gets synced to MinIO.
+# Single source of truth shared with validation/Test-Dependencies.ps1.
 # ============================================================
 
-$FileMap = [ordered]@{
-    # --- Bootstrap entry point (Be1 fetches this) ---
-    'Bootstrap-GitLabRunner.ps1'               = 'Bootstrap-GitLabRunner.ps1'
-
-    # --- lib (Phase 0 downloads these) ---
-    'lib/Config.ps1'                           = 'bootstrap/lib/Config.ps1'
-    'lib/Common.ps1'                           = 'bootstrap/lib/Common.ps1'
-
-    # --- phases (Phase 0 downloads these) ---
-    'phases/Phase1-SystemPrep.ps1'             = 'bootstrap/phases/Phase1-SystemPrep.ps1'
-    'phases/Phase2-DockerInstall.ps1'          = 'bootstrap/phases/Phase2-DockerInstall.ps1'
-    'phases/Phase3-RunnerSetup.ps1'            = 'bootstrap/phases/Phase3-RunnerSetup.ps1'
-
-    # --- validation ---
-    'validation/Invoke-FinalValidation.ps1'    = 'bootstrap/validation/Invoke-FinalValidation.ps1'
-    'validation/Test-Dependencies.ps1'         = 'validation/Test-Dependencies.ps1'
-
-    # --- scripts (Phase 3 downloads these) ---
-    'scripts/health-check.ps1'                 = 'scripts/health-check.ps1'
-    'scripts/disk-monitor.ps1'                 = 'scripts/disk-monitor.ps1'
-    'scripts/docker-watchdog.ps1'              = 'scripts/docker-watchdog.ps1'
-    'scripts/kill-stale-containers.ps1'        = 'scripts/kill-stale-containers.ps1'
-    'scripts/Register-ScheduledTasks.ps1'      = 'scripts/Register-ScheduledTasks.ps1'
-    'scripts/Import-Certificates.ps1'          = 'scripts/Import-Certificates.ps1'
-    # Enable-RemoteSSH.ps1 replaces the old Enable-RemotePowerShell.ps1.
-    # WinRM is blocked by domain GPO so we switched the remote-control plane
-    # to OpenSSH. The old key is intentionally absent here; if any stale copy
-    # remains in MinIO, it's harmless dead bytes (no script reads it anymore).
-    'scripts/Enable-RemoteSSH.ps1'             = 'scripts/Enable-RemoteSSH.ps1'
-    'scripts/Test-NetworkConnectivity.ps1'     = 'scripts/Test-NetworkConnectivity.ps1'
-    'scripts/Write-JobLog.ps1'                 = 'scripts/Write-JobLog.ps1'
-    'scripts/Export-RdpAuditLog.ps1'           = 'scripts/Export-RdpAuditLog.ps1'
-    'scripts/Export-RunnerLogs.ps1'            = 'scripts/Export-RunnerLogs.ps1'
-    'scripts/Write-GoldenVersion.ps1'          = 'scripts/Write-GoldenVersion.ps1'
-    # Phase 3 helpers added in 2.4.0 (table-driven tool installer, OpenCode +
-    # WebView2 silent installer, observability stack installer, Windows
-    # Terminal default-shell setup).
-    'scripts/Install-Tools.ps1'                = 'scripts/Install-Tools.ps1'
-    'scripts/Install-OpenCode.ps1'             = 'scripts/Install-OpenCode.ps1'
-    'scripts/Install-Observability.ps1'        = 'scripts/Install-Observability.ps1'
-    'scripts/Set-WindowsTerminalDefault.ps1'   = 'scripts/Set-WindowsTerminalDefault.ps1'
-
-    # --- tools (config files only -- binaries are uploaded manually) ---
-    'tools/opencode/opencode.jsonc'            = 'tools/opencode/opencode.jsonc'
-}
+. (Join-Path $PSScriptRoot 'FileMap.ps1')
 
 # ============================================================
 # S3 PUT (AWS Signature V4)
