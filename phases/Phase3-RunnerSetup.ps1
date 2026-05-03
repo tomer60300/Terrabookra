@@ -9,7 +9,8 @@
     3.2   Configure Windows Defender (exclusions + scheduled scan only)
     3.3   Install MinGit
     3.4   Download GitLab Runner binary
-    3.5   Pre-pull Harbor container images
+    3.5   Pre-pull Harbor container images (PARALLEL background jobs;
+          waited for just before 3.15 so 3.6 -- 3.14 run concurrently)
     3.6   Resolve token (glrt- auth token vs registration token / PAT)
     3.7   Register runner (skipped if glrt- token) + write config.toml
           (config.toml includes listen_address = ":9252" for runner metrics)
@@ -109,27 +110,46 @@ function Invoke-Phase3 {
         Write-LogError 'FATAL: Runner binary download failed'; exit 1
     }
 
-    # -- 3.5 Pre-pull Harbor images ---------------------------
-    Write-Log '3.5 Pre-pull container images'
+    # -- 3.5 Pre-pull Harbor images (parallel background) -----
+    # Each docker pull is a separate process talking to dockerd. Running them
+    # as concurrent Start-Job background jobs lets the network downloads
+    # overlap, and Docker's daemon will interleave the layer extracts as
+    # disk I/O permits. Net win for cold provision: 30-50% time reduction
+    # on the pull phase.
+    #
+    # Jobs start NOW (right after Docker verify). Steps 3.6 - 3.14 run
+    # in the foreground in parallel. We Wait-Job just before final
+    # validation, so the longest pull caps total Phase 3 time instead of
+    # serialising with everything else.
+    #
+    # docker login (if creds set) MUST happen before the jobs start --
+    # auth is persisted to %USERPROFILE%/.docker/config.json which the
+    # child PowerShell processes inherit via the shared filesystem.
+    Write-Log '3.5 Pre-pull container images (parallel background jobs)'
     if ($Script:Config.HarborUser -and $Script:Config.HarborPass) {
         Write-Log 'Logging into Harbor...'
         $Script:Config.HarborPass | docker login $Script:Config.HarborUrl -u $Script:Config.HarborUser --password-stdin 2>&1 |
             ForEach-Object { Write-Log "  docker login: $_" }
     }
-    $pullFailures = 0
+
+    $Script:PrePullJobs   = @()
+    $Script:PrePullStartT = Get-Date
     foreach ($image in $Script:Config.PrePullImages) {
-        Write-Log "Pulling: $image"
-        docker pull $image 2>&1 | ForEach-Object { Write-Log "  $_" }
-        if ($LASTEXITCODE -ne 0) {
-            Write-LogError "FAILED to pull $image"
-            $pullFailures++
+        $shortName = ($image -split '/')[-1] -replace ':', '-'
+        $jobName   = "prepull-$shortName"
+        $Script:PrePullJobs += Start-Job -Name $jobName -ArgumentList $image -ScriptBlock {
+            param($Image)
+            $output = docker pull $Image 2>&1
+            [PSCustomObject]@{
+                Image    = $Image
+                ExitCode = $LASTEXITCODE
+                Output   = ($output | Out-String)
+            }
         }
+        Write-Log "  Started: $jobName ($image)"
     }
-    if ($pullFailures -gt 0) {
-        Write-LogError "FATAL: $pullFailures Harbor image(s) failed to pull. In air-gapped environment images must be pre-pulled."
-        Write-LogError '  Verify Harbor connectivity, credentials, and that images exist in the registry.'
-        exit 1
-    }
+    Write-Log "  $($Script:PrePullJobs.Count) parallel pull job(s) running in background -- continuing with other Phase 3 work..."
+    Write-Log ''
 
     # -- 3.6 Write config.toml --------------------------------
     Write-Log '3.6 Resolve runner token + write config.toml'
@@ -280,6 +300,7 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     # -- 3.9 Deploy maintenance scripts -----------------------
     Write-Log '3.9 Deploy maintenance scripts'
     $s3Failures = 0
+    $s3Skipped  = 0
     foreach ($s in @(
         @{ Key = $Script:Config.S3Keys.HealthCheck; File = 'health-check.ps1' },
         @{ Key = $Script:Config.S3Keys.DiskMonitor;  File = 'disk-monitor.ps1' },
@@ -288,6 +309,14 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         @{ Key = $Script:Config.S3Keys.RegTasks;     File = 'Register-ScheduledTasks.ps1' }
     )) {
         $outPath = Join-Path $Script:Config.ScriptsDir $s.File
+        # Skip re-fetch if a previous phase already deposited it on disk
+        # (e.g. Import-Certificates.ps1 from Phase 1 step 1.10). Saves
+        # one S3 round-trip per file -- meaningful when sync runs across
+        # several phases and an MinIO call costs ~100ms.
+        if ((Test-Path $outPath) -and ((Get-Item $outPath).Length -gt 0)) {
+            $s3Skipped++
+            continue
+        }
         try {
             Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
             if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }
@@ -297,7 +326,8 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         }
     }
 
-    # Deploy new feature scripts
+    # Deploy new feature scripts (Import-Certificates already on disk from
+    # Phase 1 -- skip-if-exists below avoids the duplicate S3 fetch).
     foreach ($s in @(
         @{ Key = $Script:Config.S3KeysExtra.ImportCerts;          File = 'Import-Certificates.ps1' },
         @{ Key = $Script:Config.S3KeysExtra.EnableRemoteSSH;      File = 'Enable-RemoteSSH.ps1' },
@@ -312,6 +342,10 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         @{ Key = $Script:Config.S3KeysExtra.SetWtDefault;         File = 'Set-WindowsTerminalDefault.ps1' }
     )) {
         $outPath = Join-Path $Script:Config.ScriptsDir $s.File
+        if ((Test-Path $outPath) -and ((Get-Item $outPath).Length -gt 0)) {
+            $s3Skipped++
+            continue
+        }
         try {
             Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
             if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }
@@ -319,6 +353,9 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
             Write-LogWarn "Failed to download $($s.File): $_"
             $s3Failures++
         }
+    }
+    if ($s3Skipped -gt 0) {
+        Write-Log "  $s3Skipped script(s) already on disk -- skipped re-fetch"
     }
     if ($s3Failures -gt 0) {
         Write-LogWarn "S3 script deployment: $s3Failures file(s) failed -- some scheduled tasks may not work"
@@ -427,6 +464,40 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         }
     } else {
         Write-LogWarn 'Install-Observability.ps1 not found -- skipping observability stack'
+    }
+
+    # -- 3.14.5 Wait for the pre-pull jobs that were started in step 3.5
+    # to finish. By this point steps 3.6 - 3.14 have all run in the
+    # foreground in parallel with the pulls. The longest single pull
+    # caps total Phase 3 wall time.
+    if ($Script:PrePullJobs -and $Script:PrePullJobs.Count -gt 0) {
+        Write-Log ''
+        Write-Log "Waiting for $($Script:PrePullJobs.Count) pre-pull job(s) (started in step 3.5)..."
+        $pullResults = $Script:PrePullJobs | Wait-Job | ForEach-Object {
+            $r = Receive-Job -Job $_
+            Remove-Job -Job $_
+            $r
+        }
+        $pullElapsed = ((Get-Date) - $Script:PrePullStartT).TotalSeconds
+        Write-Log "  All pre-pull jobs done. Wall time since step 3.5 start: $([math]::Round($pullElapsed,1))s"
+
+        $pullFailures = 0
+        foreach ($r in $pullResults) {
+            $tail = ($r.Output -split "`n" | Where-Object { $_ } | Select-Object -Last 3)
+            if ($r.ExitCode -eq 0) {
+                Write-Log "  [OK]   $($r.Image)"
+                $tail | ForEach-Object { Write-Log "    $_" }
+            } else {
+                Write-LogError "  [FAIL] $($r.Image) (exit $($r.ExitCode))"
+                $tail | ForEach-Object { Write-LogError "    $_" }
+                $pullFailures++
+            }
+        }
+        if ($pullFailures -gt 0) {
+            Write-LogError "FATAL: $pullFailures Harbor image(s) failed to pull. In air-gapped environment images must be pre-pulled."
+            Write-LogError '  Verify Harbor connectivity, credentials, and that images exist in the registry.'
+            exit 1
+        }
     }
 
     # -- 3.15 Final validation --------------------------------

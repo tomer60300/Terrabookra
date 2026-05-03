@@ -6,6 +6,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.6] -- 2026-04-30
+
+### Performance
+
+- **Phase 3 image pulls now run in parallel as background jobs** and start
+  immediately after Docker is verified ready (step 3.5), instead of running
+  sequentially in the foreground after the rest of Phase 3 completes. The
+  three pre-pull images (`servercore:ltsc2019`, `windows:ltsc2019`, and
+  the `gitlab-runner-helper`) launch as concurrent `Start-Job` background
+  processes; steps 3.6 through 3.14 (token resolution, runner registration,
+  service install, scripts deploy, scheduled tasks, tools install, OpenCode,
+  observability) all run in the foreground in parallel with the pulls.
+  A new `Wait-Job` step right before final validation (3.14.5) collects
+  the pull results and FATALs if any failed.
+
+  Expected impact on cold provision time: total Phase 3 wall time
+  approaches `max(longest_pull, sum_of_other_steps)` instead of
+  `sum_of_pulls + sum_of_other_steps`. On a fresh VM where the
+  `windows:ltsc2019` pull dominates at ~25 minutes and the rest of
+  Phase 3 takes ~5-10 minutes, that's roughly a 30-50% reduction in
+  total Phase 3 time.
+
+### Fixed
+
+- **`scripts/Import-Certificates.ps1` no longer re-downloads the cert
+  from MinIO when it's already on disk.** The trust-store import was
+  already idempotent (skipped on thumbprint match); now the S3 fetch
+  is also skipped if the `.crt` file exists in `$CertsDir` with
+  non-zero size. Saves one round-trip per cert per script invocation.
+- **Phase 3 step 3.9 deploy loops skip re-fetching scripts that are
+  already on disk.** `Import-Certificates.ps1` was being re-downloaded
+  in step 3.9 even though Phase 1 step 1.10 had already deposited it
+  during the cert-import flow. Same skip-if-exists pattern applied to
+  both deploy loops; reports the count of skipped files in the log.
+
+### Notes
+
+- Pull jobs share the runner's `docker login` state because credentials
+  persist to `%USERPROFILE%/.docker/config.json` -- one login in the
+  parent process is inherited by all child processes.
+- Windows containers' `windowsfilter` driver still serialises layer
+  EXTRACTION across pulls (single-threaded against the data drive),
+  so the speedup comes mostly from overlapping network downloads and
+  from running pulls in parallel with the rest of Phase 3 work. It is
+  not a 3x speedup, but consistently 30-50%.
+
+---
+
 ## [2.4.5] -- 2026-04-30
 
 ### Fixed

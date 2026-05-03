@@ -44,6 +44,15 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
     foreach ($certKey in $s3Certs) {
         $fileName = Split-Path $certKey -Leaf
         $destPath = Join-Path $CertsDir $fileName
+        # Skip the S3 fetch if the cert file is already on disk with non-zero
+        # size. Re-running this script across phases (or after a reboot) would
+        # otherwise re-download the same bytes for no reason. The trust-store
+        # check below is still authoritative -- if the cert was already imported
+        # in a prior run, we'll skip the import too.
+        if ((Test-Path $destPath) -and ((Get-Item $destPath).Length -gt 0)) {
+            Write-Output "  [SKIP DL] $fileName -- already in $CertsDir ($((Get-Item $destPath).Length) bytes)"
+            continue
+        }
         $ok = Get-S3Object -Key $certKey -OutFile $destPath
         if ($ok) {
             Write-Output "  [DL] $certKey -> $destPath"
