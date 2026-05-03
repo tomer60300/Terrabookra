@@ -94,13 +94,12 @@ public class TrustAllCerts {
 # USB) get a HEAD existence check only, no MD5 comparison.
 # ============================================================
 
+# Resolve repo root from THIS script's location (always defined in any .ps1).
+# validation/Test-Dependencies.ps1 -> repo root -> ci/FileMap.ps1
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$mapPath  = Join-Path $repoRoot 'ci/FileMap.ps1'
+
 $Script:S3KeyToRepoPath = @{}
-$mapPath = Join-Path (Split-Path $Script:Config.PSScriptRoot -ErrorAction SilentlyContinue) 'ci\FileMap.ps1'
-if (-not (Test-Path $mapPath)) {
-    # Try walking up from this script's location: validation/ -> repo root -> ci/
-    $repoRoot = Split-Path $PSScriptRoot -Parent
-    $mapPath = Join-Path $repoRoot 'ci\FileMap.ps1'
-}
 if (Test-Path $mapPath) {
     . $mapPath
     foreach ($entry in $Script:FileMap.GetEnumerator()) {
@@ -108,7 +107,7 @@ if (Test-Path $mapPath) {
     }
     Write-Host "  Loaded FileMap from $mapPath ($($Script:S3KeyToRepoPath.Count) entries)" -ForegroundColor DarkGray
 } else {
-    Write-Host "  WARN: ci/FileMap.ps1 not found -- content-match check will be skipped" -ForegroundColor Yellow
+    Write-Host "  WARN: ci/FileMap.ps1 not found at $mapPath -- content-match check will be skipped" -ForegroundColor Yellow
 }
 
 # Optional: source the alias-substitution helper. When CI env vars REAL_* are
@@ -116,8 +115,8 @@ if (Test-Path $mapPath) {
 # MD5 content-match check working, we have to apply the SAME substitution to
 # the local bytes before hashing. If the helper isn't on disk (e.g. on a
 # runner where ci/ isn't deployed), define a passthrough stub.
-$subPath = if ($mapPath) { Join-Path (Split-Path $mapPath) 'Substitute-Aliases.ps1' } else { $null }
-if ($subPath -and (Test-Path $subPath)) {
+$subPath = Join-Path $repoRoot 'ci/Substitute-Aliases.ps1'
+if (Test-Path $subPath) {
     . $subPath
     if (Test-AliasSubstitutionActive) {
         Write-Host "  Alias substitution: ACTIVE -- local content will be rewritten before MD5" -ForegroundColor DarkGray
@@ -210,7 +209,13 @@ if (-not $SkipS3) {
     Write-Host '[2/3] MinIO S3 Artifacts (HEAD check)' -ForegroundColor Yellow
     Write-Host '-----------------------------------------------------'
 
-    # Collect all S3 keys from Config
+    # Collect all S3 keys to existence-check. Union of:
+    #   - $Config.S3Keys         (runtime essentials Phase 2 + 3 download)
+    #   - $Config.S3KeysExtra    (auxiliary scripts + binary installers)
+    #   - $Config.S3Certs        (internal CA cert)
+    #   - All values from $FileMap (so files that go through CI sync but
+    #     aren't referenced from $Config -- e.g. Bootstrap-GitLabRunner.ps1
+    #     and lib/Common.ps1 -- get HEAD-checked too).
     $allS3Keys = [System.Collections.ArrayList]::new()
 
     foreach ($kv in $Script:Config.S3Keys.GetEnumerator()) {
@@ -221,6 +226,34 @@ if (-not $SkipS3) {
     }
     foreach ($key in $Script:Config.S3Certs) {
         [void]$allS3Keys.Add($key)
+    }
+    foreach ($s3Key in $Script:S3KeyToRepoPath.Keys) {
+        if (-not $allS3Keys.Contains($s3Key)) { [void]$allS3Keys.Add($s3Key) }
+    }
+
+    # Bootstrap routing: when BOOTSTRAP_S3_PATH is set the bootstrap script
+    # lives in a different bucket+key (typically a Be1-readable bucket).
+    # Parse 'bucket/key/sub/path' on first slash. Used below to override
+    # the bucket per-key.
+    $Script:BootstrapAltBucket = $null
+    $Script:BootstrapAltKey    = $null
+    $Script:BootstrapDefaultKey = 'Bootstrap-GitLabRunner.ps1'
+    $bsPath = [Environment]::GetEnvironmentVariable('BOOTSTRAP_S3_PATH')
+    if ($bsPath) {
+        $slash = $bsPath.IndexOf('/')
+        if ($slash -lt 1) {
+            Write-Host "  WARN: BOOTSTRAP_S3_PATH must be 'bucket/key', got '$bsPath' -- ignoring" -ForegroundColor Yellow
+        } else {
+            $Script:BootstrapAltBucket = $bsPath.Substring(0, $slash)
+            $Script:BootstrapAltKey    = $bsPath.Substring($slash + 1)
+            Write-Host "  Bootstrap routing: $($Script:BootstrapAltBucket)/$($Script:BootstrapAltKey) (overrides default bucket)" -ForegroundColor DarkGray
+            # Replace the default bootstrap key in the check list with the alt key,
+            # so the existence check hits the right bucket.
+            [void]$allS3Keys.Remove($Script:BootstrapDefaultKey)
+            if (-not $allS3Keys.Contains($Script:BootstrapAltKey)) {
+                [void]$allS3Keys.Add($Script:BootstrapAltKey)
+            }
+        }
     }
     foreach ($kv in $Script:Config.S3Bootstrap.GetEnumerator()) {
         [void]$allS3Keys.Add($kv.Value)
@@ -240,14 +273,18 @@ if (-not $SkipS3) {
         <#
         .SYNOPSIS  AWS SigV4 HEAD request -- returns status code (200 = exists, 404 = missing).
         #>
-        param([string]$Key)
+        param(
+            [string]$Key,
+            [string]$BucketOverride = $null
+        )
+        $effectiveBucket = if ($BucketOverride) { $BucketOverride } else { $bucket }
 
         $now       = [DateTime]::UtcNow
         $dateStamp = $now.ToString('yyyyMMdd')
         $amzDate   = $now.ToString('yyyyMMddTHHmmssZ')
 
         $encodedKey       = ($Key -split '/' | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/'
-        $canonicalUri     = "/$bucket/$encodedKey"
+        $canonicalUri     = "/$effectiveBucket/$encodedKey"
         $payloadHash      = 'UNSIGNED-PAYLOAD'
         $canonicalHeaders = "host:$hostHeader`nx-amz-content-sha256:$payloadHash`nx-amz-date:$amzDate`n"
         $signedHeaders    = 'host;x-amz-content-sha256;x-amz-date'
@@ -278,7 +315,7 @@ if (-not $SkipS3) {
         ).Replace('-','').ToLower()
 
         $authHeader = "AWS4-HMAC-SHA256 Credential=$accessKey/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
-        $url = "$endpoint/$bucket/$Key"
+        $url = "$endpoint/$effectiveBucket/$Key"
 
         try {
             $request = [System.Net.HttpWebRequest]::Create($url)
@@ -320,7 +357,13 @@ if (-not $SkipS3) {
     $repoRoot = Split-Path $PSScriptRoot -Parent
 
     foreach ($key in ($allS3Keys | Sort-Object)) {
-        $result = Send-S3Head -Key $key
+        $bucketLabel = $bucket
+        $bucketArgs  = @{}
+        if ($Script:BootstrapAltBucket -and $key -eq $Script:BootstrapAltKey) {
+            $bucketArgs.BucketOverride = $Script:BootstrapAltBucket
+            $bucketLabel               = $Script:BootstrapAltBucket
+        }
+        $result = Send-S3Head -Key $key @bucketArgs
         if ($result.StatusCode -eq 200) {
             $sizeStr = if ($result.Size -ge 1MB) {
                 '{0:N1} MB' -f ($result.Size / 1MB)
@@ -329,7 +372,7 @@ if (-not $SkipS3) {
             } else {
                 "$($result.Size) B"
             }
-            Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $true -Detail $sizeStr
+            Add-Result -Category 'S3' -Target "$bucketLabel/$key" -Ok $true -Detail $sizeStr
 
             # --- Content-match check via ETag (S3/MinIO ETag = MD5(content) for
             # single-PUT uploads, which Sync-ToMinio.ps1 always uses).
@@ -350,16 +393,16 @@ if (-not $SkipS3) {
                 }
 
                 if (-not (Test-Path $localFull)) {
-                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $false `
+                    Add-Result -Category 'S3-Content' -Target "$bucketLabel/$key" -Ok $false `
                         -Detail "local file missing: $localRel"
                 }
                 elseif (-not $remoteEtag) {
-                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                    Add-Result -Category 'S3-Content' -Target "$bucketLabel/$key" -Ok $true `
                         -Detail 'skipped (no ETag header)'
                 }
                 elseif ($remoteEtag -match '-') {
                     # Multipart upload -- ETag is opaque <md5-of-md5s>-<parts>
-                    Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                    Add-Result -Category 'S3-Content' -Target "$bucketLabel/$key" -Ok $true `
                         -Detail "skipped (multipart upload, ETag opaque: $remoteEtag)"
                 }
                 else {
@@ -372,10 +415,10 @@ if (-not $SkipS3) {
                     $md5        = [System.Security.Cryptography.MD5]::Create()
                     $localMd5   = [System.BitConverter]::ToString($md5.ComputeHash($localBytes)).Replace('-','').ToLower()
                     if ($localMd5 -eq $remoteEtag.ToLower()) {
-                        Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $true `
+                        Add-Result -Category 'S3-Content' -Target "$bucketLabel/$key" -Ok $true `
                             -Detail "MD5=$($localMd5.Substring(0,12))..."
                     } else {
-                        Add-Result -Category 'S3-Content' -Target "$bucket/$key" -Ok $false `
+                        Add-Result -Category 'S3-Content' -Target "$bucketLabel/$key" -Ok $false `
                             -Detail "MD5 mismatch: local=$($localMd5.Substring(0,12))... remote=$($remoteEtag.Substring(0,[Math]::Min(12,$remoteEtag.Length)))..."
                     }
                 }
@@ -384,7 +427,7 @@ if (-not $SkipS3) {
         else {
             $severity = if ($Script:SoftOptionalS3Keys -contains $key) { 'WARN' } else { 'FAIL' }
             $detail   = if ($severity -eq 'WARN') { "$($result.Error) (optional -- can be skipped)" } else { $result.Error }
-            Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $false -Detail $detail -Severity $severity
+            Add-Result -Category 'S3' -Target "$bucketLabel/$key" -Ok $false -Detail $detail -Severity $severity
         }
     }
     Write-Host ''

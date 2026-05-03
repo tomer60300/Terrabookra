@@ -78,8 +78,15 @@ public class TrustAllCerts {
 function Put-S3Object {
     param(
         [Parameter(Mandatory)][string]$Key,
-        [Parameter(Mandatory)][string]$FilePath
+        [Parameter(Mandatory)][string]$FilePath,
+        # Optional override -- routes this single PUT to a different bucket
+        # while keeping the same endpoint/credentials. Used to ship
+        # Bootstrap-GitLabRunner.ps1 to a Be1-readable bucket when
+        # $env:BOOTSTRAP_S3_PATH is set.
+        [string]$BucketOverride = $null
     )
+
+    $effectiveBucket = if ($BucketOverride) { $BucketOverride } else { $Bucket }
 
     $uri      = [System.Uri]$Endpoint
     $hostName = $uri.Host
@@ -100,7 +107,7 @@ function Put-S3Object {
     $amzDate   = $now.ToString('yyyyMMddTHHmmssZ')
 
     $encodedKey       = ($Key -split '/' | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/'
-    $canonicalUri     = "/$Bucket/$encodedKey"
+    $canonicalUri     = "/$effectiveBucket/$encodedKey"
     $canonicalHeaders = "host:$hostName`nx-amz-content-sha256:$payloadHash`nx-amz-date:$amzDate`n"
     $signedHeaders    = 'host;x-amz-content-sha256;x-amz-date'
     $canonicalRequest = "PUT`n$canonicalUri`n`n$canonicalHeaders`n$signedHeaders`n$payloadHash"
@@ -128,7 +135,7 @@ function Put-S3Object {
     $signature = [System.BitConverter]::ToString((HmacSHA256 $kSigning $stringToSign)).Replace('-','').ToLower()
 
     $authHeader = "AWS4-HMAC-SHA256 Credential=$AccessKey/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
-    $url = "$Endpoint/$Bucket/$Key"
+    $url = "$Endpoint/$effectiveBucket/$Key"
 
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add('Authorization', $authHeader)
@@ -162,9 +169,37 @@ if (Test-AliasSubstitutionActive) {
 if ($DryRun) { Write-Output "MODE: DRY RUN" }
 Write-Output "============================================"
 
+# Bootstrap routing: optional env var BOOTSTRAP_S3_PATH (format: 'bucket/key')
+# sends Bootstrap-GitLabRunner.ps1 to a separate bucket while leaving everything
+# else in $Bucket. Same MinIO credentials. Useful when Be1's MinIO permissions
+# don't extend to gitlab-runner-golden.
+$Script:BootstrapDefaultRepo = 'Bootstrap-GitLabRunner.ps1'
+$Script:BootstrapAltBucket   = $null
+$Script:BootstrapAltKey      = $null
+$bsPath = [Environment]::GetEnvironmentVariable('BOOTSTRAP_S3_PATH')
+if ($bsPath) {
+    $slash = $bsPath.IndexOf('/')
+    if ($slash -lt 1) {
+        Write-Output "  WARN: BOOTSTRAP_S3_PATH='$bsPath' not in 'bucket/key' form -- using default bucket for bootstrap"
+    } else {
+        $Script:BootstrapAltBucket = $bsPath.Substring(0, $slash)
+        $Script:BootstrapAltKey    = $bsPath.Substring($slash + 1)
+        Write-Output "  Bootstrap routing: $Script:BootstrapDefaultRepo -> $($Script:BootstrapAltBucket)/$($Script:BootstrapAltKey)"
+        Write-Output ''
+    }
+}
+
 foreach ($entry in $FileMap.GetEnumerator()) {
     $repoFile = Join-Path $repoRoot $entry.Key
     $s3Key    = $entry.Value
+    $bucketOverrideArgs = @{}
+    $bucketLabel        = $Bucket
+
+    if ($Script:BootstrapAltBucket -and $entry.Key -eq $Script:BootstrapDefaultRepo) {
+        $s3Key                              = $Script:BootstrapAltKey
+        $bucketOverrideArgs.BucketOverride  = $Script:BootstrapAltBucket
+        $bucketLabel                        = $Script:BootstrapAltBucket
+    }
 
     if (-not (Test-Path $repoFile)) {
         Write-Output "  SKIP (not in repo): $($entry.Key)"
@@ -175,18 +210,18 @@ foreach ($entry in $FileMap.GetEnumerator()) {
     $sizeKB = [math]::Round((Get-Item $repoFile).Length / 1KB, 1)
 
     if ($DryRun) {
-        Write-Output "  WOULD UPLOAD: $($entry.Key) -> $s3Key ($sizeKB KB)"
+        Write-Output "  WOULD UPLOAD: $($entry.Key) -> $bucketLabel/$s3Key ($sizeKB KB)"
         $uploaded++
         continue
     }
 
     try {
-        Put-S3Object -Key $s3Key -FilePath $repoFile
-        Write-Output "  UPLOADED: $($entry.Key) -> $s3Key ($sizeKB KB)"
+        Put-S3Object -Key $s3Key -FilePath $repoFile @bucketOverrideArgs
+        Write-Output "  UPLOADED: $($entry.Key) -> $bucketLabel/$s3Key ($sizeKB KB)"
         $uploaded++
     }
     catch {
-        Write-Output "  FAILED: $($entry.Key) -> $s3Key : $_"
+        Write-Output "  FAILED: $($entry.Key) -> $bucketLabel/$s3Key : $_"
         $failed++
     }
 }

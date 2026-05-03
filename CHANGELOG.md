@@ -6,6 +6,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.4] -- 2026-04-30
+
+### Fixed
+
+- **`Test-Dependencies.ps1` FileMap loader bug.** Previously dereferenced
+  `$Script:Config.PSScriptRoot` (which doesn't exist -- `Config` is a
+  hashtable, not a script) and then called `Split-Path $null` and
+  `Test-Path $null` on the result, raising two non-fatal exceptions per
+  run. Replaced with a single `$repoRoot = Split-Path $PSScriptRoot -Parent`
+  derivation that's always defined. Same fix applied to the
+  `Substitute-Aliases.ps1` loader path.
+- **`Test-Dependencies.ps1` was missing existence checks for files
+  uploaded via `$FileMap` but not present in `$Config.S3Keys` /
+  `S3KeysExtra` / `S3Certs`.** Notably, `Bootstrap-GitLabRunner.ps1` and
+  `lib/Common.ps1` were never HEAD-checked. Now `$allS3Keys` is the union
+  of all four sources, so every key the sync uploads gets verified.
+
+### Added
+
+- **Bootstrap routing via `BOOTSTRAP_S3_PATH` env var.** When set
+  (format: `bucket/key/path`), `Sync-ToMinio.ps1` routes
+  `Bootstrap-GitLabRunner.ps1` to that alternate bucket+key while every
+  other file still goes to `MINIO_BUCKET`. Same endpoint, same
+  credentials. Use case: Be1's MinIO read permissions don't extend to
+  the main `gitlab-runner-golden` bucket -- park the bootstrap in a
+  Be1-readable bucket without splitting credentials. When unset, falls
+  back to the existing default location.
+  - `Test-Dependencies.ps1` reads the same env var and checks the
+    bootstrap in the alternate bucket too.
+  - `Put-S3Object` got an optional `-BucketOverride` parameter; the
+    main loop passes it for the bootstrap row only.
+  - Sync output now shows the actual bucket each file went to:
+    `UPLOADED: Bootstrap-GitLabRunner.ps1 -> be1-scripts/runners/...`.
+
+---
+
 ## [2.4.3] -- 2026-04-30
 
 ### Fixed
