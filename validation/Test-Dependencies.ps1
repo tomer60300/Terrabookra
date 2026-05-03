@@ -444,13 +444,114 @@ if (-not $SkipHarbor) {
     $harborScheme = 'https'
     $harborBase   = "${harborScheme}://$($Script:Config.HarborUrl)"
 
-    # Build Basic auth header if credentials are set
+    # Build Basic auth header if credentials are set. Used as fallback
+    # AND as the Basic auth for the Bearer token-exchange call (the auth
+    # service expects Basic). Empty creds = anonymous token request, which
+    # Harbor honours for public projects.
     $authHeaders = @{}
-    if ($Script:Config.HarborUser -and $Script:Config.HarborPass) {
-        $pair  = "$($Script:Config.HarborUser):$($Script:Config.HarborPass)"
+    $harborUser  = $Script:Config.HarborUser
+    $harborPass  = $Script:Config.HarborPass
+    if ($harborUser -and $harborPass) {
+        $pair  = "$harborUser`:$harborPass"
         $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
         $b64   = [System.Convert]::ToBase64String($bytes)
         $authHeaders['Authorization'] = "Basic $b64"
+    }
+
+    # ============================================================
+    # Harbor Bearer token exchange.
+    # When Harbor returns 401 on a manifest request, the WWW-Authenticate
+    # header tells us where to get a Bearer token. Even public projects
+    # require this dance for anonymous reads -- this is the same flow
+    # docker pull implements internally. Without it, a vanilla HEAD/GET
+    # against /v2/<repo>/manifests/<tag> always fails with 401, even
+    # though `docker pull` works fine.
+    #
+    # Realm/service/scope are parsed out of the WWW-Authenticate value.
+    # We GET <realm>?service=<service>&scope=<scope> with optional
+    # Basic auth (anonymous if HarborUser/HarborPass are empty), Harbor
+    # returns a JWT in {"token": "..."}, we use it as
+    # Authorization: Bearer <token> on the retry.
+    # ============================================================
+    function Get-HarborBearerToken {
+        param(
+            [Parameter(Mandatory)][string]$Challenge,
+            [string]$User = $null,
+            [string]$Pass = $null
+        )
+        if ($Challenge -notmatch '^Bearer\s+') { return $null }
+        $params = @{}
+        foreach ($m in [regex]::Matches($Challenge, '(\w+)="([^"]*)"')) {
+            $params[$m.Groups[1].Value] = $m.Groups[2].Value
+        }
+        if (-not $params['realm']) { return $null }
+        $url = $params['realm']
+        $first = $true
+        foreach ($k in @('service','scope')) {
+            if ($params[$k]) {
+                $sep = if ($first) { '?' } else { '&' }
+                $url += "$sep$k=" + [System.Uri]::EscapeDataString($params[$k])
+                $first = $false
+            }
+        }
+        try {
+            $req = [System.Net.HttpWebRequest]::Create($url)
+            $req.Method  = 'GET'
+            $req.Timeout = 10000
+            if ($User -and $Pass) {
+                $basic = [Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes("$User`:$Pass"))
+                $req.Headers.Add('Authorization', "Basic $basic")
+            }
+            $resp = $req.GetResponse()
+            $stream = $resp.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($stream)
+            $body   = $reader.ReadToEnd()
+            $reader.Close()
+            $resp.Close()
+            $json = $body | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($json) {
+                if ($json.token)        { return $json.token }
+                if ($json.access_token) { return $json.access_token }
+            }
+        } catch {
+            return $null
+        }
+        return $null
+    }
+
+    # Helper: probe a manifest URL with optional Authorization.
+    # Returns @{ Code; Digest; WWWAuth; Error }.
+    function Send-HarborManifestProbe {
+        param(
+            [Parameter(Mandatory)][string]$Url,
+            [Parameter(Mandatory)][ValidateSet('HEAD','GET')][string]$Method,
+            [string]$AuthorizationHeader = $null
+        )
+        try {
+            $req = [System.Net.HttpWebRequest]::Create($Url)
+            $req.Method  = $Method
+            $req.Timeout = 15000
+            $req.Accept  = 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'
+            if ($AuthorizationHeader) { $req.Headers.Add('Authorization', $AuthorizationHeader) }
+            $resp = $req.GetResponse()
+            $digest = $resp.Headers['Docker-Content-Digest']
+            $code   = [int]$resp.StatusCode
+            $resp.Close()
+            return @{ Code = $code; Digest = $digest; WWWAuth = $null; Error = $null }
+        }
+        catch [System.Net.WebException] {
+            $webEx = $_.Exception
+            if ($webEx.Response) {
+                $code    = [int]$webEx.Response.StatusCode
+                $wwwAuth = $webEx.Response.Headers['WWW-Authenticate']
+                $webEx.Response.Close()
+                return @{ Code = $code; Digest = $null; WWWAuth = $wwwAuth; Error = "HTTP $code" }
+            }
+            return @{ Code = 0; Digest = $null; WWWAuth = $null; Error = $webEx.Message }
+        }
+        catch {
+            return @{ Code = 0; Digest = $null; WWWAuth = $null; Error = $_.Exception.Message }
+        }
     }
 
     # Test registry v2 API is reachable
@@ -498,61 +599,57 @@ if (-not $SkipHarbor) {
             $imageOk = $false
             $detail  = ''
 
-            try {
-                $req = [System.Net.HttpWebRequest]::Create($manifestUrl)
-                $req.Method  = 'HEAD'
-                $req.Timeout = 15000
-                $req.Accept  = 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'
-                foreach ($h in $authHeaders.GetEnumerator()) { $req.Headers.Add($h.Key, $h.Value) }
+            # Try anonymous (or pre-set Basic) HEAD first.
+            $authForFirst = if ($authHeaders['Authorization']) { $authHeaders['Authorization'] } else { $null }
+            $r = Send-HarborManifestProbe -Url $manifestUrl -Method 'HEAD' -AuthorizationHeader $authForFirst
 
-                $resp = $req.GetResponse()
-                $imageOk = ([int]$resp.StatusCode -eq 200)
-                $contentLen = $resp.ContentLength
-                $digest = $resp.Headers['Docker-Content-Digest']
-                $resp.Close()
-
-                if ($digest) {
-                    $shortDigest = $digest.Substring(0, [Math]::Min(19, $digest.Length))
-                    $detail = "digest=$shortDigest"
-                } else {
-                    $detail = 'manifest exists'
-                }
+            if ($r.Code -eq 200) {
+                $imageOk = $true
+                $detail  = if ($r.Digest) { "digest=$($r.Digest.Substring(0, [Math]::Min(19, $r.Digest.Length)))" } else { 'manifest exists' }
             }
-            catch [System.Net.WebException] {
-                $webEx = $_.Exception
-                if ($webEx.Response) {
-                    $code = [int]$webEx.Response.StatusCode
-                    $detail = "HTTP $code"
-                    $webEx.Response.Close()
-                    # Some registries (Harbor in particular) reject HEAD with 401 even
-                    # for anonymously-readable repos -- you only see the 200 over GET.
-                    # Other registries return 405 (Method Not Allowed) for HEAD on
-                    # manifests. Try GET in either case before giving up.
-                    if ($code -eq 405 -or $code -eq 401) {
-                        try {
-                            $req2 = [System.Net.HttpWebRequest]::Create($manifestUrl)
-                            $req2.Method  = 'GET'
-                            $req2.Timeout = 15000
-                            $req2.Accept  = 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json'
-                            foreach ($h in $authHeaders.GetEnumerator()) { $req2.Headers.Add($h.Key, $h.Value) }
-                            $resp2 = $req2.GetResponse()
-                            $imageOk = ([int]$resp2.StatusCode -eq 200)
-                            $digest2 = $resp2.Headers['Docker-Content-Digest']
-                            $resp2.Close()
-                            $detail = if ($digest2) {
-                                "digest=$($digest2.Substring(0, [Math]::Min(19, $digest2.Length))) (GET fallback after $code)"
-                            } else { "manifest exists (GET fallback after HEAD $code)" }
+            elseif ($r.Code -eq 401 -and $r.WWWAuth -match '^Bearer\s+') {
+                # Harbor's standard challenge for both public and private repos.
+                # Exchange Basic creds (or anonymous) at the realm URL for a Bearer token.
+                $token = Get-HarborBearerToken -Challenge $r.WWWAuth -User $harborUser -Pass $harborPass
+                if (-not $token) {
+                    $detail = '401 Bearer challenge -- token exchange failed (check HarborUser/HarborPass or project visibility)'
+                }
+                else {
+                    $bearerHeader = "Bearer $token"
+                    $r2 = Send-HarborManifestProbe -Url $manifestUrl -Method 'HEAD' -AuthorizationHeader $bearerHeader
+                    if ($r2.Code -eq 200) {
+                        $imageOk = $true
+                        $detail  = if ($r2.Digest) { "digest=$($r2.Digest.Substring(0, [Math]::Min(19, $r2.Digest.Length))) (Bearer auth)" } else { 'manifest exists (Bearer auth)' }
+                    }
+                    elseif ($r2.Code -eq 405) {
+                        # Some registries don't support HEAD; retry GET with the same Bearer.
+                        $r3 = Send-HarborManifestProbe -Url $manifestUrl -Method 'GET' -AuthorizationHeader $bearerHeader
+                        if ($r3.Code -eq 200) {
+                            $imageOk = $true
+                            $detail  = if ($r3.Digest) { "digest=$($r3.Digest.Substring(0, [Math]::Min(19, $r3.Digest.Length))) (Bearer + GET fallback)" } else { 'manifest exists (Bearer + GET fallback)' }
                         }
-                        catch {
-                            $detail = "GET fallback failed: $($_.Exception.Message)"
+                        else {
+                            $detail = "Bearer + GET fallback got HTTP $($r3.Code)"
                         }
                     }
-                } else {
-                    $detail = $webEx.Message
+                    else {
+                        $detail = "Bearer auth got HTTP $($r2.Code) (token rejected -- creds or scope wrong)"
+                    }
                 }
             }
-            catch {
-                $detail = $_.Exception.Message
+            elseif ($r.Code -eq 405) {
+                # Plain GET fallback (no Bearer challenge offered).
+                $r4 = Send-HarborManifestProbe -Url $manifestUrl -Method 'GET' -AuthorizationHeader $authForFirst
+                if ($r4.Code -eq 200) {
+                    $imageOk = $true
+                    $detail  = if ($r4.Digest) { "digest=$($r4.Digest.Substring(0, [Math]::Min(19, $r4.Digest.Length))) (GET fallback after 405)" } else { 'manifest exists (GET fallback after 405)' }
+                }
+                else {
+                    $detail = "GET fallback got HTTP $($r4.Code)"
+                }
+            }
+            else {
+                $detail = if ($r.Error) { $r.Error } else { "HTTP $($r.Code)" }
             }
 
             Add-Result -Category 'Harbor' -Target $image -Ok $imageOk -Detail $detail

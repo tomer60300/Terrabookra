@@ -6,6 +6,43 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.5] -- 2026-04-30
+
+### Fixed
+
+- **`verify-minio` now implements Harbor's Bearer token-exchange flow.**
+  Previously the manifest check sent HEAD/GET with at most a Basic auth
+  header, which Harbor rejects with `401 Unauthorized` -- even for
+  publicly-readable repos. Harbor's `WWW-Authenticate: Bearer realm=...`
+  challenge is the same dance `docker pull` runs internally:
+    1. HEAD/GET the manifest; receive 401 with the Bearer challenge
+       header.
+    2. Parse `realm`, `service`, `scope` out of the challenge.
+    3. GET `<realm>?service=<service>&scope=<scope>` -- with optional
+       Basic auth from `HarborUser`/`HarborPass`, or anonymously when
+       both are empty (Harbor honours anonymous token requests for
+       public projects).
+    4. Receive `{"token": "..."}`. Retry the manifest with
+       `Authorization: Bearer <token>`.
+  The previous code's GET fallback on 401 still did the GET unauthenticated,
+  which Harbor also rejected. Result: every Harbor row in verify-minio
+  came back FAIL with HTTP 401 even though `docker pull` worked fine.
+  Now the row reports e.g. `digest=sha256:abc... (Bearer auth)` and the
+  gate goes green.
+
+### Added
+
+- `Get-HarborBearerToken` helper -- pure PowerShell, parses
+  `WWW-Authenticate: Bearer realm="...",service="...",scope="..."` and
+  GETs the token from the realm URL. Anonymous when no creds, Basic-
+  authenticated against the realm when creds are set.
+- `Send-HarborManifestProbe` helper -- consolidates HEAD/GET request
+  logic so the probe sequence (anonymous -> Bearer challenge -> token
+  exchange -> retry) reads as a clean state machine instead of nested
+  try/catch.
+
+---
+
 ## [2.4.4] -- 2026-04-30
 
 ### Fixed
