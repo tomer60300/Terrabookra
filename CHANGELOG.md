@@ -6,6 +6,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ---
 
+## [2.4.3] -- 2026-04-30
+
+### Fixed
+
+- **Harbor manifest check now handles HTTP 401** in addition to 405 for the
+  HEAD->GET fallback. Harbor returns 401 (not 405) for HEAD on manifest
+  endpoints when no Authorization header is sent, even on anonymously-
+  readable repos. `docker pull` works because it always uses GET internally;
+  the verifier now matches that behaviour. Previously this was reported as a
+  hard auth failure even for healthy registries.
+
+### Changed
+
+- **Soft-optional S3 keys** are now reported as `WARN`, not `FAIL`, when
+  missing. The first (and currently only) soft-optional key is
+  `tools/openssh/administrators_authorized_keys` -- runners with AD password
+  auth alone work fine without it; only fleets that opt in to public-key
+  auth need the file uploaded. Verify-minio gate exit code now considers
+  only hard `FAIL` rows; warnings are surfaced in the summary but do not
+  fail the pipeline.
+- `Test-Dependencies.ps1` summary output reorganised into separate `Failed`
+  and `Warnings (not failing the gate)` sections so the two are visually
+  distinct in CI logs.
+
+### Notes (no code change)
+
+- All binary blobs under `tools/<binary>/` (WebView2 installer, OpenCode
+  setup, OpenSSH zip, observability MSIs, the 14 tool installers, helper
+  binaries under `binaries/`) are uploaded to MinIO **manually** via USB
+  walk -- the CI sync only handles source code (`.ps1`, `.toml`, `.jsonc`).
+  This is unchanged from 2.4.0; documenting here for clarity.
+
+---
+
 ## [2.4.2] -- 2026-04-30
 
 ### Added

@@ -134,12 +134,37 @@ if ($subPath -and (Test-Path $subPath)) {
 $results  = [System.Collections.ArrayList]::new()
 $passCount = 0
 $failCount = 0
+$warnCount = 0
+
+# Soft-optional S3 keys: missing = WARN (not a hard failure). These are
+# files the runner can boot without -- in particular, the SSH-key
+# authorized_keys file for fleet-wide passwordless SSH (AD password auth
+# works fine without it).
+$Script:SoftOptionalS3Keys = @(
+    'tools/openssh/administrators_authorized_keys'
+)
 
 function Add-Result {
-    param([string]$Category, [string]$Target, [bool]$Ok, [string]$Detail = '')
-    if ($Ok) { $script:passCount++ } else { $script:failCount++ }
-    $status = if ($Ok) { 'PASS' } else { 'FAIL' }
-    $color  = if ($Ok) { 'Green' } else { 'Red' }
+    param(
+        [string]$Category,
+        [string]$Target,
+        [bool]$Ok,
+        [string]$Detail = '',
+        # When $Ok is $false: -Severity 'WARN' downgrades the failure to a
+        # warning (does not fail the gate, exit code unaffected). Default 'FAIL'
+        # preserves the previous strict semantics.
+        [ValidateSet('FAIL','WARN')][string]$Severity = 'FAIL'
+    )
+    if ($Ok) {
+        $script:passCount++
+        $status = 'PASS'; $color = 'Green'
+    } elseif ($Severity -eq 'WARN') {
+        $script:warnCount++
+        $status = 'WARN'; $color = 'Yellow'
+    } else {
+        $script:failCount++
+        $status = 'FAIL'; $color = 'Red'
+    }
     Write-Host "  [$status] " -ForegroundColor $color -NoNewline
     Write-Host "$Category | $Target" -NoNewline
     if ($Detail) { Write-Host " -- $Detail" -ForegroundColor DarkGray } else { Write-Host '' }
@@ -357,7 +382,9 @@ if (-not $SkipS3) {
             }
         }
         else {
-            Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $false -Detail $result.Error
+            $severity = if ($Script:SoftOptionalS3Keys -contains $key) { 'WARN' } else { 'FAIL' }
+            $detail   = if ($severity -eq 'WARN') { "$($result.Error) (optional -- can be skipped)" } else { $result.Error }
+            Add-Result -Category 'S3' -Target "$bucket/$key" -Ok $false -Detail $detail -Severity $severity
         }
     }
     Write-Host ''
@@ -454,8 +481,11 @@ if (-not $SkipHarbor) {
                     $code = [int]$webEx.Response.StatusCode
                     $detail = "HTTP $code"
                     $webEx.Response.Close()
-                    # Try GET fallback -- some registries don't support HEAD on manifests
-                    if ($code -eq 405) {
+                    # Some registries (Harbor in particular) reject HEAD with 401 even
+                    # for anonymously-readable repos -- you only see the 200 over GET.
+                    # Other registries return 405 (Method Not Allowed) for HEAD on
+                    # manifests. Try GET in either case before giving up.
+                    if ($code -eq 405 -or $code -eq 401) {
                         try {
                             $req2 = [System.Net.HttpWebRequest]::Create($manifestUrl)
                             $req2.Method  = 'GET'
@@ -467,8 +497,8 @@ if (-not $SkipHarbor) {
                             $digest2 = $resp2.Headers['Docker-Content-Digest']
                             $resp2.Close()
                             $detail = if ($digest2) {
-                                "digest=$($digest2.Substring(0, [Math]::Min(19, $digest2.Length)))"
-                            } else { 'manifest exists (GET fallback)' }
+                                "digest=$($digest2.Substring(0, [Math]::Min(19, $digest2.Length))) (GET fallback after $code)"
+                            } else { "manifest exists (GET fallback after HEAD $code)" }
                         }
                         catch {
                             $detail = "GET fallback failed: $($_.Exception.Message)"
@@ -497,17 +527,28 @@ if (-not $SkipHarbor) {
 # SUMMARY
 # ============================================================
 
-$total = $passCount + $failCount
+$total = $passCount + $failCount + $warnCount
 
 Write-Host '=====================================================' -ForegroundColor Cyan
 if ($failCount -eq 0) {
-    Write-Host "  ALL $total CHECKS PASSED" -ForegroundColor Green
+    if ($warnCount -gt 0) {
+        Write-Host "  ALL CRITICAL CHECKS PASSED ($passCount pass, $warnCount warn)" -ForegroundColor Green
+    } else {
+        Write-Host "  ALL $total CHECKS PASSED" -ForegroundColor Green
+    }
 } else {
-    Write-Host "  $failCount of $total CHECKS FAILED" -ForegroundColor Red
+    Write-Host "  $failCount of $total CHECKS FAILED ($warnCount warnings)" -ForegroundColor Red
     Write-Host ''
     Write-Host '  Failed items:' -ForegroundColor Red
     $results | Where-Object { $_.Status -eq 'FAIL' } | ForEach-Object {
         Write-Host "    - $($_.Category) | $($_.Target) -- $($_.Detail)" -ForegroundColor Red
+    }
+}
+if ($warnCount -gt 0) {
+    Write-Host ''
+    Write-Host '  Warnings (not failing the gate):' -ForegroundColor Yellow
+    $results | Where-Object { $_.Status -eq 'WARN' } | ForEach-Object {
+        Write-Host "    - $($_.Category) | $($_.Target) -- $($_.Detail)" -ForegroundColor Yellow
     }
 }
 Write-Host "=====================================================`n" -ForegroundColor Cyan
@@ -517,6 +558,7 @@ $summary = [PSCustomObject]@{
     Total    = $total
     Passed   = $passCount
     Failed   = $failCount
+    Warned   = $warnCount
     Results  = $results
 }
 
