@@ -1,6 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Disk space monitor -- emergency prune when disk is critically low.
+    HARDENED build. See REVIEW.md (M3).
 
 .DESCRIPTION
     Runs every 30 minutes via scheduled task (Disk-Space-Monitor).
@@ -9,16 +10,18 @@
       < 10 GB  -> CRITICAL: full docker system prune --all
       < 20 GB  -> WARNING:  event log only (no auto action)
 
-.PARAMETER LogFile
-    Path to the disk monitor log file. Default: C:\GitLab-Runner\logs\disk-monitor.log
+    What changed vs 2.4.6:
+      * Guards every Get-PSDrive call. Previously, if Get-PSDrive failed
+        (drive absent, or a bad -DataDrive passed), `(...).Free` was $null and
+        `$null -lt 10` evaluates $true in PS 5.1 -> a spurious destructive
+        `docker system prune --all --force` on a healthy host. A missing drive
+        is now logged and skipped, never pruned.
 
-.PARAMETER DataDrive
-    Drive letter for Docker data/builds (e.g. 'E'). If omitted, auto-detects E: or defaults to C.
+.PARAMETER LogFile    Default: C:\GitLab-Runner\logs\disk-monitor.log
+.PARAMETER DataDrive  Drive letter for Docker data/builds (e.g. 'E'). Auto-detects E: else C.
 
 .NOTES
-    Event IDs:
-      9001 -- Critical disk space, emergency prune executed
-      9002 -- Low disk space warning
+    Event IDs: 9001 critical prune executed; 9002 low-space warning.
 #>
 
 param(
@@ -42,11 +45,24 @@ $DataDrive = $DataDrive.TrimEnd(':')
 $drives = @('C')
 if ($DataDrive -ne 'C') { $drives += $DataDrive }
 
+# Safe free-space read: returns $null if the drive can't be queried.
+function Get-FreeGB {
+    param([string]$Drive)
+    $psd = Get-PSDrive $Drive -ErrorAction SilentlyContinue
+    if (-not $psd -or $null -eq $psd.Free) { return $null }
+    return [math]::Round($psd.Free / 1GB, 1)
+}
+
 $pruneNeeded = $false
 $logLines = @()
 
 foreach ($drv in $drives) {
-    $freeGB = [math]::Round((Get-PSDrive $drv).Free / 1GB, 1)
+    $freeGB = Get-FreeGB -Drive $drv
+    if ($null -eq $freeGB) {
+        # Drive not found / not queryable -- never treat as "0 free" (would prune).
+        $logLines += "SKIP ${drv}: drive not found"
+        continue
+    }
 
     if ($freeGB -lt 10) {
         $pruneNeeded = $true
@@ -68,8 +84,8 @@ if ($pruneNeeded) {
     # Re-check after prune
     $afterParts = @()
     foreach ($drv in $drives) {
-        $freeAfter = [math]::Round((Get-PSDrive $drv).Free / 1GB, 1)
-        $afterParts += "${drv}:=${freeAfter}GB"
+        $freeAfter = Get-FreeGB -Drive $drv
+        if ($null -ne $freeAfter) { $afterParts += "${drv}:=${freeAfter}GB" }
     }
     $afterMsg = $afterParts -join ', '
     Write-EventLog -LogName Application -Source $source -EventId 9001 -EntryType Error `

@@ -1,46 +1,37 @@
 <#
 .SYNOPSIS
     Install OpenCode desktop with WebView2 prerequisite + machine-wide config.
+    HARDENED build -- proof against the exit-6 "installed but not detected"
+    failure (Cluster 2). See PATCH-NOTES.md.
 
 .DESCRIPTION
-    Idempotent, air-gap friendly installer for OpenCode on a runner VM.
+    What changed vs 2.4.6/2.4.7:
+      * Test-OpenCodeInstalled no longer relies on 4 hard-coded paths. Phase 3
+        runs as SYSTEM, so a per-user (NSIS/electron-builder) install lands in
+        the SYSTEM profile (C:\Windows\System32\config\systemprofile\AppData\
+        Local\Programs\...) and/or a versioned subfolder -- both of which the
+        old fixed list missed, producing a false exit 6 even though the
+        installer succeeded. Detection now:
+          1. reads the install location from the Uninstall registry key
+             (written regardless of which profile installed it), and
+          2. falls back to a recursive sweep of every plausible install root,
+             including the SYSTEM profile.
 
     Steps:
-      1. Detect WebView2 Evergreen runtime. If absent, install from S3-staged
-         standalone installer (silent /install).
-      2. Detect OpenCode desktop. If absent, install from S3-staged setup.exe
-         (Squirrel installer -- accepts --silent).
-      3. Place opencode.jsonc at the machine-wide path (default
-         C:\ProgramData\opencode\opencode.jsonc) with read access for all
-         authenticated users and write only for admins.
-      4. Set the OPENCODE_CONFIG machine environment variable to that path
-         so every user on the VM reads the same config.
+      1. Detect/Install WebView2 Evergreen runtime (silent).
+      2. Detect/Install OpenCode desktop (NSIS silent /S).
+      3. Publish opencode.jsonc machine-wide (C:\ProgramData\opencode\).
+      4. Set OPENCODE_CONFIG machine env var to that path.
 
-    Called by Phase 3 (step 3.12) but also runnable standalone after a fresh
-    re-deploy of binaries from MinIO.
-
-.PARAMETER WebView2Installer
-    Local path to the staged WebView2 standalone installer.
-    Default: C:\Tools\WebView2\MicrosoftEdgeWebView2RuntimeInstallerX64.exe
-
-.PARAMETER OpenCodeInstaller
-    Local path to the staged OpenCode desktop setup.exe.
-    Default: C:\Tools\opencode\opencode-desktop-windows-x64-setup.exe
-
-.PARAMETER OpenCodeConfigSource
-    Local path to the staged opencode.jsonc to publish machine-wide.
-    Default: C:\Tools\opencode\opencode.jsonc
-
-.PARAMETER MachineConfigPath
-    Final machine-wide path for opencode.jsonc. Every user reads from here
-    via the OPENCODE_CONFIG environment variable.
-    Default: C:\ProgramData\opencode\opencode.jsonc
+.PARAMETER WebView2Installer    Local path to staged WebView2 installer.
+.PARAMETER OpenCodeInstaller    Local path to staged OpenCode setup.exe.
+.PARAMETER OpenCodeConfigSource Local path to staged opencode.jsonc.
+.PARAMETER MachineConfigPath    Final machine-wide path for opencode.jsonc.
 
 .NOTES
     File:        scripts/Install-OpenCode.ps1
-    Requires:    Run as Administrator. Stages must already be on disk
-                 (downloaded from MinIO by the caller).
-    Idempotent:  Yes -- detects existing installs and skips re-installation.
+    Requires:    Run as Administrator. Stages must already be on disk.
+    Idempotent:  Yes.
 #>
 
 param(
@@ -52,18 +43,9 @@ param(
 
 $ErrorActionPreference = 'Continue'
 
-# ============================================================
-# CONSTANTS -- WebView2 detection registry locations
-# ============================================================
-# WebView2 Evergreen Runtime registers under one of these GUID keys depending
-# on install scope (machine-wide x64 vs per-user). Either presence indicates
-# the runtime is installed.
+# WebView2 Evergreen Runtime registry keys (machine-wide x64 / x86 scope).
 $WV2_KEY_MACHINE_X64 = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 $WV2_KEY_MACHINE_X86 = 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-
-# ============================================================
-# HELPERS
-# ============================================================
 
 function Write-Step {
     param([string]$Message, [string]$Level = 'INFO')
@@ -82,17 +64,55 @@ function Get-WebView2Version {
 }
 
 function Test-OpenCodeInstalled {
-    # Squirrel installs to %LOCALAPPDATA%\Programs\opencode by default for the
-    # current user, OR C:\Program Files\opencode for per-machine. We check
-    # several plausible locations; any hit means installed.
-    $candidates = @(
-        "$env:LOCALAPPDATA\Programs\opencode\opencode.exe",
-        "$env:ProgramFiles\opencode\opencode.exe",
-        'C:\Program Files\opencode\opencode.exe',
-        'C:\Program Files (x86)\opencode\opencode.exe'
+    <#
+    .SYNOPSIS  Return the path to opencode.exe if installed, else $null.
+               Survives SYSTEM-profile and versioned-subfolder installs.
+    #>
+
+    # 1) Uninstall registry entry -- written no matter which profile installed it.
+    $uninstallRoots = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )
-    foreach ($p in $candidates) {
-        if (Test-Path $p) { return $p }
+    foreach ($root in $uninstallRoots) {
+        $hits = Get-ItemProperty $root -ErrorAction SilentlyContinue |
+                Where-Object { $_.DisplayName -match 'opencode' }
+        foreach ($h in @($hits)) {
+            if ($h.InstallLocation) {
+                $exe = Join-Path $h.InstallLocation 'opencode.exe'
+                if (Test-Path $exe) { return $exe }
+            }
+            if ($h.DisplayIcon) {
+                $exe = ($h.DisplayIcon -replace '^"?([^"]+\.exe).*$', '$1')
+                if ($exe -and (Test-Path $exe) -and ($exe -match 'opencode')) { return $exe }
+            }
+        }
+    }
+
+    # 2) Filesystem sweep across every plausible install root (incl. SYSTEM
+    #    profile, since Phase 3 runs as SYSTEM). Handles versioned subfolders.
+    $roots = @(
+        "$env:LOCALAPPDATA\Programs",
+        'C:\Windows\System32\config\systemprofile\AppData\Local\Programs',
+        "$env:ProgramFiles",
+        'C:\Program Files',
+        'C:\Program Files (x86)'
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    # Fast path: the conventional leaf folders, no recursion.
+    foreach ($r in $roots) {
+        foreach ($leaf in @('opencode\opencode.exe', 'opencode-desktop\opencode.exe')) {
+            $p = Join-Path $r $leaf
+            if (Test-Path $p) { return $p }
+        }
+    }
+    # Fallback: depth-bounded recurse (handles versioned subfolders like app-0.x.y)
+    # without walking the entire Program Files tree (which can take minutes).
+    foreach ($r in $roots) {
+        $exe = Get-ChildItem -Path $r -Filter 'opencode.exe' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($exe) { return $exe.FullName }
     }
     return $null
 }
@@ -100,7 +120,7 @@ function Test-OpenCodeInstalled {
 # ============================================================
 # 1. WebView2 -- prerequisite for OpenCode
 # ============================================================
-Write-Step '========== Install-OpenCode =========='
+Write-Step '========== Install-OpenCode (hardened) =========='
 Write-Step '1/4  WebView2 runtime'
 
 $wv2Version = Get-WebView2Version
@@ -109,7 +129,6 @@ if ($wv2Version) {
 } else {
     if (-not (Test-Path $WebView2Installer)) {
         Write-Step "  FATAL: WebView2 installer not found at $WebView2Installer" 'ERROR'
-        Write-Step '         OpenCode cannot run without WebView2. Aborting.' 'ERROR'
         exit 2
     }
     Write-Step "  Running silent install: $WebView2Installer /silent /install"
@@ -139,18 +158,24 @@ if ($existingExe) {
         Write-Step "  FATAL: OpenCode installer not found at $OpenCodeInstaller" 'ERROR'
         exit 5
     }
-    # OpenCode desktop ships an NSIS installer, NOT a Squirrel one (confirmed
-    # by the official download URL `opencode.ai/download/stable/windows-x64-nsis`).
-    # NSIS silent flag is /S (capital S, no equals sign); --silent is a
-    # Squirrel convention and would be ignored or trigger a UI prompt.
+    # OpenCode desktop ships an NSIS installer (opencode.ai/download/stable/
+    # windows-x64-nsis). NSIS silent flag is /S (capital S, no '=').
     Write-Step "  Running silent install: $OpenCodeInstaller /S"
     $proc = Start-Process -FilePath $OpenCodeInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow
     if ($proc.ExitCode -ne 0) {
         Write-Step "  WARN: OpenCode installer exited $($proc.ExitCode) -- verifying anyway" 'WARN'
     }
+    Start-Sleep -Seconds 3   # NSIS can return before the last file is flushed
     $existingExe = Test-OpenCodeInstalled
     if (-not $existingExe) {
-        Write-Step '  FATAL: OpenCode installer ran but no opencode.exe found in expected paths' 'ERROR'
+        Write-Step '  FATAL: OpenCode installer ran but no opencode.exe found.' 'ERROR'
+        Write-Step '         Searched registry Uninstall keys + these roots:' 'ERROR'
+        foreach ($r in @("$env:LOCALAPPDATA\Programs",
+                         'C:\Windows\System32\config\systemprofile\AppData\Local\Programs',
+                         'C:\Program Files','C:\Program Files (x86)')) {
+            Write-Step "           $r" 'ERROR'
+        }
+        Write-Step '         If the binary is elsewhere, add its root to Test-OpenCodeInstalled.' 'ERROR'
         exit 6
     }
     Write-Step "  OpenCode installed at $existingExe"
@@ -175,7 +200,6 @@ Copy-Item -Path $OpenCodeConfigSource -Destination $MachineConfigPath -Force
 Write-Step "  Copied opencode.jsonc to $MachineConfigPath"
 
 # ACL: SYSTEM + Administrators full control, Authenticated Users read-only.
-# Reset inheritance to ensure deterministic permissions across re-runs.
 $acl = New-Object System.Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true, $false)  # disable inheritance, drop existing
 foreach ($rule in @(
@@ -198,8 +222,6 @@ if ($current -eq $MachineConfigPath) {
     [System.Environment]::SetEnvironmentVariable('OPENCODE_CONFIG', $MachineConfigPath, 'Machine')
     Write-Step "  Set OPENCODE_CONFIG = $MachineConfigPath (Machine scope)"
 }
-
-# Reflect into current process so any post-step that checks env sees it
 $env:OPENCODE_CONFIG = $MachineConfigPath
 
 Write-Step '========== Install-OpenCode COMPLETE =========='
