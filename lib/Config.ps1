@@ -199,6 +199,7 @@ $Script:Config = @{
         InstallObservability = 'scripts/Install-Observability.ps1'
         SetWtDefault         = 'scripts/Set-WindowsTerminalDefault.ps1'
         DepValidator         = 'validation/Test-Dependencies.ps1'
+        AssertEnv            = 'scripts/Assert-Environment.ps1'
 
         # --- OpenCode + WebView2 ---------------------------------------------
         WebView2Exe          = 'tools/opencode/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'

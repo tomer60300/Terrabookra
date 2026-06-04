@@ -36,6 +36,7 @@
 
 function Invoke-Phase3 {
     Write-Log '========== PHASE 3: Runner Setup & Configuration =========='
+    $Script:ProvisioningFailed = $false
 
     # -- 3.1 Verify Docker daemon -----------------------------
     Write-Log '3.1 Verify Docker daemon'
@@ -375,15 +376,19 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     # -- 3.11 Register scheduled tasks ------------------------
     Write-Log '3.11 Register scheduled tasks'
     $regScript = Join-Path $Script:Config.ScriptsDir 'Register-ScheduledTasks.ps1'
-    if (Test-Path $regScript) {
+    if (-not (Test-Path $regScript)) {
+        Write-LogError 'FATAL: Register-ScheduledTasks.ps1 missing -- maintenance tasks not registered'
+        $Script:ProvisioningFailed = $true
+    } else {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $regScript `
             -ScriptsDir $Script:Config.ScriptsDir `
             -LogsDir $Script:Config.LogsDir `
             -BuildsDir $Script:Config.BuildsDir 2>&1 |
             ForEach-Object { Write-Log "  tasks: $_" }
-    } else {
-        Write-LogWarn 'Register-ScheduledTasks.ps1 not found -- inline fallback'
-        Register-InlineScheduledTask
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogError "Register-ScheduledTasks.ps1 exited $LASTEXITCODE -- task hardening incomplete"
+            $Script:ProvisioningFailed = $true
+        }
     }
 
     # -- 3.12 Install tools (table-driven) --------------------
@@ -460,7 +465,8 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
             -DockerMetricsPort    $Script:Config.MetricsPorts.Docker 2>&1 |
             ForEach-Object { Write-Log "  obs: $_" }
         if ($LASTEXITCODE -ne 0) {
-            Write-LogWarn "Install-Observability.ps1 exited $LASTEXITCODE -- check exporter logs"
+            Write-LogError "Install-Observability.ps1 exited $LASTEXITCODE -- observability stack degraded"
+            $Script:ProvisioningFailed = $true
         }
     } else {
         Write-LogWarn 'Install-Observability.ps1 not found -- skipping observability stack'
@@ -519,42 +525,11 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         Write-LogWarn 'Write-GoldenVersion.ps1 not found -- skipping version stamp'
     }
 
-    if ($Script:RunnerRegistrationFailed) {
-        Write-LogError '========== PHASE 3 COMPLETE -- RUNNER IS DEGRADED (registration or service failed) =========='
+    if ($Script:RunnerRegistrationFailed -or $Script:ProvisioningFailed) {
+        Write-LogError '========== PHASE 3 COMPLETE -- RUNNER IS DEGRADED =========='
         Write-LogError 'Exiting with code 1 so Be1 knows this VM is NOT operational.'
         exit 1
     } else {
         Write-Log '========== PHASE 3 COMPLETE -- RUNNER IS OPERATIONAL =========='
     }
-}
-
-# ============================================================
-# INLINE SCHEDULED TASKS (fallback if Register-ScheduledTasks.ps1 missing)
-# ============================================================
-
-function Register-InlineScheduledTask {
-    $sd = $Script:Config.ScriptsDir
-    $ld = $Script:Config.LogsDir
-    $bd = $Script:Config.BuildsDir
-    $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $forever = New-TimeSpan -Days 3650
-    $tasks = @(
-        @{ Name='Docker-Image-Prune';          Trigger=(New-ScheduledTaskTrigger -Daily -At '03:00');                                                                         Action="-NoProfile -Command `"docker image prune -a --filter 'until=168h' --force 2>&1 | Out-File '$ld\image-prune.log' -Append`"" },
-        @{ Name='Docker-Container-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 4) -RepetitionDuration $forever);  Action="-NoProfile -Command `"docker container prune --force 2>&1 | Out-File '$ld\container-prune.log' -Append`"" },
-        @{ Name='Docker-Stale-Container-Kill'; Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Hours 2) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\kill-stale-containers.ps1`"" },
-        @{ Name='Docker-Volume-Prune';         Trigger=(New-ScheduledTaskTrigger -Daily -At '03:30');                                                                         Action="-NoProfile -Command `"docker volume prune --force 2>&1 | Out-File '$ld\volume-prune.log' -Append`"" },
-        @{ Name='Docker-BuildCache-Prune';     Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '04:00');                                                      Action="-NoProfile -Command `"docker builder prune --all --force 2>&1 | Out-File '$ld\buildcache-prune.log' -Append`"" },
-        @{ Name='Runner-Workspace-Cleanup';    Trigger=(New-ScheduledTaskTrigger -Daily -At '04:00');                                                                         Action="-NoProfile -Command `"Get-ChildItem '$bd' -Directory | Where-Object { `$_.LastWriteTime -lt (Get-Date).AddDays(-3) } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue`"" },
-        @{ Name='Disk-Space-Monitor';          Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 30) -RepetitionDuration $forever);Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\disk-monitor.ps1`"" },
-        @{ Name='Docker-Daemon-Watchdog';      Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\docker-watchdog.ps1`"" },
-        @{ Name='Runner-Service-Watchdog';     Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever); Action="-NoProfile -Command `"if ((Get-Service gitlab-runner -ErrorAction SilentlyContinue).Status -ne 'Running') { Start-Service gitlab-runner; Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9004 -EntryType Warning -Message 'Runner restarted.' }`"" },
-        @{ Name='Log-Rotation';                Trigger=(New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '05:00');                                                      Action="-NoProfile -Command `"Get-ChildItem '$ld\*.log' | Where-Object { `$_.Length -gt 50MB } | ForEach-Object { Move-Item `$_.FullName (`$_.FullName + '.old') -Force }`"" },
-        @{ Name='Network-Connectivity-Monitor';Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Test-NetworkConnectivity.ps1`"" },
-        @{ Name='RDP-Audit-Logger';            Trigger=(New-ScheduledTaskTrigger -Once -At '00:00' -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration $forever);  Action="-NoProfile -ExecutionPolicy Bypass -File `"$sd\Export-RdpAuditLog.ps1`"" }
-    )
-    foreach ($t in $tasks) {
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $t.Action
-        Register-ScheduledTask -TaskName $t.Name -Action $action -Trigger $t.Trigger -Principal $pr -Force | Out-Null
-    }
-    Write-Log "Registered $($tasks.Count) scheduled tasks (inline fallback)"
 }

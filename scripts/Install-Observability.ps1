@@ -144,9 +144,17 @@ function Ensure-FirewallRule {
         Write-Step "  Firewall '$Name' (TCP $Port) already exists"
         return
     }
-    New-NetFirewallRule -Name $Name -DisplayName $DisplayName -Direction Inbound `
-        -Protocol TCP -LocalPort $Port -Action Allow -Enabled True | Out-Null
-    Write-Step "  Firewall '$Name' created (TCP $Port inbound)"
+    try {
+        New-NetFirewallRule -Name $Name -DisplayName $DisplayName -Direction Inbound `
+            -Protocol TCP -LocalPort $Port -Action Allow -Enabled True -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Step "  [FAIL] firewall '$Name' (TCP $Port): $($_.Exception.Message)" 'ERROR'; $script:Failures++; return
+    }
+    if (Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue) {
+        Write-Step "  Firewall '$Name' created (TCP $Port inbound)"
+    } else {
+        Write-Step "  [FAIL] firewall '$Name' missing after create" 'ERROR'; $script:Failures++
+    }
 }
 
 # ============================================================

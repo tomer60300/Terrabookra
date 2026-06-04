@@ -84,7 +84,15 @@ function Invoke-FinalValidation {
     Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
     Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }
     Check 'Helper image present'        { (docker images $Script:Config.HelperImage --format '{{.Tag}}' 2>$null) -match 'v16.7.0' }
-    Check 'Scheduled tasks (>=10)'      { (Get-ScheduledTask | Where-Object { $_.TaskName -match '^(Docker|Runner|Disk|Log|Network|RDP)-' } | Measure-Object).Count -ge 10 }
+    Check 'Scheduled tasks (13 required present)' {
+        $required = @('Docker-Image-Prune','Docker-Container-Cleanup','Docker-Stale-Container-Kill','Docker-Volume-Prune','Docker-BuildCache-Prune','Runner-Workspace-Cleanup','Disk-Space-Monitor','Docker-Daemon-Watchdog','Runner-Service-Watchdog','Log-Rotation','Network-Connectivity-Monitor','RDP-Audit-Logger','Health-Check')
+        $have = @((Get-ScheduledTask -ErrorAction SilentlyContinue).TaskName)
+        @($required | Where-Object { $have -notcontains $_ }).Count -eq 0
+    }
+    Check 'Health-Check exec-limit = 2h' {
+        $st = Get-ScheduledTask -TaskName 'Health-Check' -ErrorAction SilentlyContinue
+        $st -and $st.Settings.ExecutionTimeLimit -eq 'PT2H'
+    }
     Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
     Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
     Check 'Disk free C: >= 50 GB'       { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }
