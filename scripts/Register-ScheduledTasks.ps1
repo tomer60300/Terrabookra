@@ -43,9 +43,9 @@ $ErrorActionPreference = 'Stop'
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $forever   = New-TimeSpan -Days 3650
 
-# Shared settings: effectively-unlimited run time + start-if-missed + no overlap.
+# Shared settings: 2h kill-limit (enough for a big prune, kills a hang) + start-if-missed + no overlap.
 $settings  = New-ScheduledTaskSettingsSet `
-                -ExecutionTimeLimit (New-TimeSpan -Days 3650) `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
                 -StartWhenAvailable `
                 -MultipleInstances IgnoreNew `
                 -AllowStartIfOnBatteries `

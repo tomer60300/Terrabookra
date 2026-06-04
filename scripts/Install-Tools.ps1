@@ -207,7 +207,13 @@ function Install-MsixBundle {
         foreach ($depKey in $Tool.Dependencies) {
             $depPath = Join-Path $Tool.StageDir (Split-Path $depKey -Leaf)
             if (-not (Test-StagedFile -Path $depPath -Kind 'zip')) {
-                Get-S3Object -Key $depKey -OutFile $depPath | Out-Null
+                if (-not (Get-S3Object -Key $depKey -OutFile $depPath)) {
+                    Write-Step "  ERROR: dependency download failed: $depKey -- skipping" 'ERROR'; continue
+                }
+            }
+            # Revalidate after download -- never hand a missing/garbage dependency to Add-AppxProvisionedPackage
+            if (-not (Test-StagedFile -Path $depPath -Kind 'zip')) {
+                Write-Step "  ERROR: dependency invalid after download: $depPath -- skipping" 'ERROR'; continue
             }
             $depPaths += $depPath
         }

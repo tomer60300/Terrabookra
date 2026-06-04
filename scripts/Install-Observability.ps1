@@ -47,6 +47,7 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$script:Failures = 0
 
 function Write-Step {
     param([string]$Message, [string]$Level = 'INFO')
@@ -176,7 +177,7 @@ if ($wxSvc) {
 if (Start-ServiceWithRetry -Name 'windows_exporter') {
     Write-Step '  [PASS] windows_exporter service is RUNNING'
 } else {
-    Write-Step '  [FAIL] windows_exporter service not running (check MSI staging + msiexec log)' 'ERROR'
+    Write-Step '  [FAIL] windows_exporter service not running (check MSI staging + msiexec log)' 'ERROR'; $script:Failures++
 }
 Ensure-FirewallRule -Name 'WindowsExporter-In-TCP' -DisplayName 'Prometheus windows_exporter' -Port $WindowsExporterPort
 
@@ -253,10 +254,10 @@ if (Get-Service blackbox_exporter -ErrorAction SilentlyContinue) {
     if (Start-ServiceWithRetry -Name 'blackbox_exporter') {
         Write-Step '  [PASS] blackbox_exporter service is RUNNING'
     } else {
-        Write-Step '  [FAIL] blackbox_exporter registered but not running (check blackbox_exporter.err.log)' 'ERROR'
+        Write-Step '  [FAIL] blackbox_exporter registered but not running (check blackbox_exporter.err.log)' 'ERROR'; $script:Failures++
     }
 } else {
-    Write-Step '  [FAIL] blackbox_exporter service not registered' 'ERROR'
+    Write-Step '  [FAIL] blackbox_exporter service not registered' 'ERROR'; $script:Failures++
 }
 Ensure-FirewallRule -Name 'BlackboxExporter-In-TCP' -DisplayName 'Prometheus blackbox_exporter' -Port $BlackboxExporterPort
 
@@ -274,4 +275,8 @@ Ensure-FirewallRule -Name 'DockerMetrics-In-TCP' -DisplayName 'Docker daemon met
 
 Write-Step ''
 Write-Step '========== Install-Observability COMPLETE =========='
+if ($script:Failures -gt 0) {
+    Write-Step "  $script:Failures component(s) failed -- exiting 1" 'ERROR'
+    exit 1
+}
 exit 0

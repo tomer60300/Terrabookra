@@ -33,6 +33,25 @@
 function Invoke-Phase1 {
     Write-Log '========== PHASE 1: System Preparation =========='
 
+    # -- 0.5 Environment preflight (fail fast on a bad host) --
+    Write-Log '0.5 Environment preflight (Assert-Environment)'
+    $preScript = Join-Path $PSScriptRoot '..\scripts\Assert-Environment.ps1'
+    if (-not (Test-Path $preScript)) {
+        $preLocal = Join-Path $Script:Config.ScriptsDir 'Assert-Environment.ps1'
+        if (-not (Test-Path $preLocal)) {
+            Get-S3Object -Key 'scripts/Assert-Environment.ps1' -OutFile $preLocal | Out-Null
+        }
+        $preScript = $preLocal
+    }
+    if (Test-Path $preScript) {
+        $preResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preScript 2>&1
+        $preExit   = $LASTEXITCODE
+        $preResult | ForEach-Object { Write-Log "  preflight: $_" }
+        if ($preExit -ne 0) { Write-LogError 'FATAL: environment preflight failed -- aborting'; exit 1 }
+    } else {
+        Write-LogWarn 'Assert-Environment.ps1 not found -- skipping preflight'
+    }
+
     # -- 1.0 Pre-flight dependency validation -----------------
     Write-Log '1.0 Pre-flight dependency validation (DNS + S3 + Harbor)'
     $depScript = Join-Path $PSScriptRoot '..\validation\Test-Dependencies.ps1'
