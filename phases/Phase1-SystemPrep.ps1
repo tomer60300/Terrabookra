@@ -198,10 +198,15 @@ function Invoke-Phase1 {
         Write-Log '  Fetching Import-Certificates.ps1 from S3...'
         Get-S3Object -Key $Script:Config.S3KeysExtra.ImportCerts -OutFile $importScript | Out-Null
     }
-    if (Test-Path $importScript) {
-        & $importScript -CertsDir $Script:Config.CertsDir 2>&1 | ForEach-Object { Write-Log "  certs: $_" }
-    } else {
-        Write-LogWarn 'Import-Certificates.ps1 not found -- skipping cert import'
+    if (-not (Test-Path $importScript)) {
+        Write-LogError 'FATAL: Import-Certificates.ps1 could not be fetched from S3. Cert trust is required -- aborting before the Phase 1 marker.'
+        exit 1
+    }
+    $global:LASTEXITCODE = 0
+    & $importScript -CertsDir $Script:Config.CertsDir 2>&1 | ForEach-Object { Write-Log "  certs: $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-LogError "FATAL: Import-Certificates.ps1 exited $LASTEXITCODE -- aborting before the Phase 1 marker."
+        exit 1
     }
 
     # -- 1.11 Enable OpenSSH (remote control plane) -----------
@@ -226,6 +231,10 @@ function Invoke-Phase1 {
         Write-Log '  Fetching OpenSSH-Win64.zip from S3...'
         Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshZip -OutFile $Script:Config.OpenSshZipLocal | Out-Null
     }
+    if (-not (Test-Path $Script:Config.OpenSshZipLocal)) {
+        Write-LogError 'FATAL: OpenSSH-Win64.zip could not be fetched from S3. SSH is the remote control plane (WinRM is GPO-blocked) -- aborting before the Phase 1 marker.'
+        exit 1
+    }
     if (-not (Test-Path $Script:Config.OpenSshAuthKeysSource)) {
         Write-Log '  Fetching administrators_authorized_keys from S3 (optional)...'
         Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshAuthKeys -OutFile $Script:Config.OpenSshAuthKeysSource | Out-Null
@@ -237,16 +246,21 @@ function Invoke-Phase1 {
         Write-Log '  Fetching Enable-RemoteSSH.ps1 from S3...'
         Get-S3Object -Key $Script:Config.S3KeysExtra.EnableRemoteSSH -OutFile $sshScript | Out-Null
     }
-    if (Test-Path $sshScript) {
-        & $sshScript `
-            -OpenSshZip           $Script:Config.OpenSshZipLocal `
-            -InstallDir           $Script:Config.OpenSshInstallDir `
-            -AuthorizedKeysSource $Script:Config.OpenSshAuthKeysSource `
-            -FirewallRuleName     $Script:Config.OpenSshFirewallRule `
-            -AllowedADGroups      $Script:Config.OpenSshAllowedADGroups 2>&1 |
-            ForEach-Object { Write-Log "  ssh: $_" }
-    } else {
-        Write-LogWarn 'Enable-RemoteSSH.ps1 not found -- skipping SSH setup'
+    if (-not (Test-Path $sshScript)) {
+        Write-LogError 'FATAL: Enable-RemoteSSH.ps1 could not be fetched from S3. SSH is the remote control plane -- aborting before the Phase 1 marker.'
+        exit 1
+    }
+    $global:LASTEXITCODE = 0
+    & $sshScript `
+        -OpenSshZip           $Script:Config.OpenSshZipLocal `
+        -InstallDir           $Script:Config.OpenSshInstallDir `
+        -AuthorizedKeysSource $Script:Config.OpenSshAuthKeysSource `
+        -FirewallRuleName     $Script:Config.OpenSshFirewallRule `
+        -AllowedADGroups      $Script:Config.OpenSshAllowedADGroups 2>&1 |
+        ForEach-Object { Write-Log "  ssh: $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-LogError "FATAL: Enable-RemoteSSH.ps1 exited $LASTEXITCODE (sshd failed to start?) -- aborting before the Phase 1 marker."
+        exit 1
     }
 
     # -- 1.12 Enable RDP audit policy -------------------------

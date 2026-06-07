@@ -189,7 +189,15 @@ if ($bsPath) {
     }
 }
 
-foreach ($entry in $FileMap.GetEnumerator()) {
+# Upload the bootstrap script LAST. If a runner re-triggers mid-sync it must
+# never fetch a Bootstrap-GitLabRunner.ps1 that references scripts/phases not
+# yet uploaded -- every other file lands first, the bootstrap seals the set.
+$orderedEntries = @(
+    $FileMap.GetEnumerator() | Where-Object { $_.Key -ne $Script:BootstrapDefaultRepo }
+) + @(
+    $FileMap.GetEnumerator() | Where-Object { $_.Key -eq $Script:BootstrapDefaultRepo }
+)
+foreach ($entry in $orderedEntries) {
     $repoFile = Join-Path $repoRoot $entry.Key
     $s3Key    = $entry.Value
     $bucketOverrideArgs = @{}

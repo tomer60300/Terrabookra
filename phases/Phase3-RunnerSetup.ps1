@@ -237,14 +237,20 @@ function Invoke-Phase3 {
         Write-LogError '    Fix: supply a valid glrt- token or restore GitLab connectivity, then re-run Phase 3'
     } else {
         # Write (or overwrite) config.toml with our full config
+        # config.toml tuning comes from Config (was hardcoded). Booleans must
+        # render lowercase for TOML, so stringify them before interpolation.
+        $r      = $Script:Config.Runner
+        $rPriv  = $r.Privileged.ToString().ToLower()
+        $rTls   = $r.TlsVerify.ToString().ToLower()
+        $rNoCac = $r.DisableCache.ToString().ToLower()
         $configContent = @"
 # GitLab Runner Configuration -- Auto-generated
 # Host: $hostname | Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 
 concurrent = $($Script:Config.ConcurrentJobs)
 check_interval = $($Script:Config.CheckInterval)
-shutdown_timeout = 300
-log_level = "info"
+shutdown_timeout = $($r.ShutdownTimeout)
+log_level = "$($r.LogLevel)"
 
 # Prometheus metrics endpoint (consumed by the observability stack).
 # Firewall hole opened by Install-Observability.ps1.
@@ -255,7 +261,7 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
   url = "$($Script:Config.GitLabUrl)"
   token = "$runnerToken"
   executor = "docker-windows"
-  tls-verify = false
+  tls-verify = $rTls
   environment = ["GIT_SSL_NO_VERIFY=true", "DOCKER_TLS_CERTDIR="]
   pre_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File ${scriptsEsc}\\Write-JobLog.ps1 -Action start"
   post_build_script = "powershell -NoProfile -ExecutionPolicy Bypass -File ${scriptsEsc}\\Write-JobLog.ps1 -Action end"
@@ -263,19 +269,19 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
   [runners.docker]
     image = "$defaultImage"
     helper_image = "$($Script:Config.HelperImage)"
-    isolation = "process"
-    pull_policy = ["if-not-present"]
-    tls_verify = false
-    privileged = false
-    shm_size = 268435456
+    isolation = "$($r.Isolation)"
+    pull_policy = ["$($r.PullPolicy)"]
+    tls_verify = $rTls
+    privileged = $rPriv
+    shm_size = $($r.ShmSize)
     volumes = ["$buildsVol", "$cacheVol"]
     allowed_images = []
     allowed_services = []
-    wait_for_services_timeout = 30
-    disable_cache = false
+    wait_for_services_timeout = $($r.WaitForServicesTimeout)
+    disable_cache = $rNoCac
 
   [runners.cache]
-    Type = ""
+    Type = "$($r.CacheType)"
 "@
         $configContent | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
         Write-Log 'config.toml written'
@@ -320,14 +326,10 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         @{ Key = $Script:Config.S3Keys.RegTasks;     File = 'Register-ScheduledTasks.ps1' }
     )) {
         $outPath = Join-Path $Script:Config.ScriptsDir $s.File
-        # Skip re-fetch if a previous phase already deposited it on disk
-        # (e.g. Import-Certificates.ps1 from Phase 1 step 1.10). Saves
-        # one S3 round-trip per file -- meaningful when sync runs across
-        # several phases and an MinIO call costs ~100ms.
-        if ((Test-Path $outPath) -and ((Get-Item $outPath).Length -gt 0)) {
-            $s3Skipped++
-            continue
-        }
+        # Always re-download (Get-S3Object overwrites in place). A maintenance
+        # script left on disk by an earlier (pre-fix) provision must never
+        # shadow an updated copy in MinIO -- the "cached scripts block fixes"
+        # failure. Re-fetch is a few small files, once per Phase 3 run.
         try {
             Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
             if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }
@@ -337,8 +339,8 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         }
     }
 
-    # Deploy new feature scripts (Import-Certificates already on disk from
-    # Phase 1 -- skip-if-exists below avoids the duplicate S3 fetch).
+    # Deploy feature + maintenance scripts. Always re-download so an updated
+    # copy in MinIO is never shadowed by a stale on-disk one.
     foreach ($s in @(
         @{ Key = $Script:Config.S3KeysExtra.ImportCerts;          File = 'Import-Certificates.ps1' },
         @{ Key = $Script:Config.S3KeysExtra.EnableRemoteSSH;      File = 'Enable-RemoteSSH.ps1' },
@@ -353,10 +355,7 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         @{ Key = $Script:Config.S3KeysExtra.SetWtDefault;         File = 'Set-WindowsTerminalDefault.ps1' }
     )) {
         $outPath = Join-Path $Script:Config.ScriptsDir $s.File
-        if ((Test-Path $outPath) -and ((Get-Item $outPath).Length -gt 0)) {
-            $s3Skipped++
-            continue
-        }
+        # Always re-download (Get-S3Object overwrites in place).
         try {
             Get-S3Object -Key $s.Key -OutFile $outPath | Out-Null
             if (-not (Test-Path $outPath)) { throw "File not created: $outPath" }

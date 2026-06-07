@@ -115,6 +115,9 @@ verify-minio:
     - docker
   needs:
     - sync-to-minio
+  variables:
+    MINIO_BUCKET: "gitlab-runner-golden"
+    MINIO_REGION: "us-east-1"
   script:
     - >
       powershell -NoProfile -ExecutionPolicy Bypass

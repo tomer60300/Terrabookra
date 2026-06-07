@@ -259,11 +259,15 @@ if (-not $SkipS3) {
         [void]$allS3Keys.Add($kv.Value)
     }
 
-    $endpoint  = $Script:Config.MinioEndpoint
-    $bucket    = $Script:Config.MinioBucket
-    $accessKey = $Script:Config.MinioAccessKey
-    $secretKey = $Script:Config.MinioSecretKey
-    $region    = $Script:Config.MinioRegion
+    # Allow CI to inject MinIO endpoint/creds via environment (the same vars the
+    # sync job uses). Falls back to Config for the Phase 1 on-host preflight,
+    # where these env vars are absent. Without this, verify-minio in CI reads the
+    # 'YOUR_*' Config placeholders and every HEAD check fails.
+    $endpoint  = if ($env:MINIO_ENDPOINT)   { $env:MINIO_ENDPOINT }   else { $Script:Config.MinioEndpoint }
+    $bucket    = if ($env:MINIO_BUCKET)     { $env:MINIO_BUCKET }     else { $Script:Config.MinioBucket }
+    $accessKey = if ($env:MINIO_ACCESS_KEY) { $env:MINIO_ACCESS_KEY } else { $Script:Config.MinioAccessKey }
+    $secretKey = if ($env:MINIO_SECRET_KEY) { $env:MINIO_SECRET_KEY } else { $Script:Config.MinioSecretKey }
+    $region    = if ($env:MINIO_REGION)     { $env:MINIO_REGION }     else { $Script:Config.MinioRegion }
 
     $uri       = [System.Uri]$endpoint
     $hostHeader = $uri.Host

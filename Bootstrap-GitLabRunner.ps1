@@ -220,12 +220,9 @@ function Invoke-Phase0 {
         $relPath = $entry.Value
         $absPath = Join-Path $Script:BootstrapDir $relPath
 
-        if (Test-Path $absPath) {
-            Write-BootstrapLog "  SKIP (exists): $relPath"
-            $skipped++
-            continue
-        }
-
+        # Always re-fetch bootstrap-controlled files (tiny). A stale cached copy
+        # from a pre-fix provision would otherwise mask an update pushed to
+        # MinIO -- the "cached bootstrap blocks fixes" failure. Overwrites in place.
         $ok = Get-BootstrapS3Object -Key $s3Key -OutFile $absPath
         if ($ok) {
             $downloaded++

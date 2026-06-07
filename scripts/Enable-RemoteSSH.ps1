@@ -166,6 +166,13 @@ try {
 }
 $svc = Get-Service sshd -ErrorAction SilentlyContinue
 Write-Step "  sshd status: $($svc.Status)"
+# SSH is the remote control plane (WinRM is GPO-blocked at Kayhut). If sshd is
+# not Running, Be1 loses remote access after the next reboot -- fail hard so the
+# provision aborts instead of producing an unreachable VM.
+if (-not $svc -or $svc.Status -ne 'Running') {
+    Write-Step "  FATAL: sshd is not Running (status: $($svc.Status)). SSH control plane unavailable." 'ERROR'
+    exit 5
+}
 
 # ssh-agent (used by some workflows; harmless to enable)
 try {

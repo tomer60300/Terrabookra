@@ -127,12 +127,30 @@ $Script:Config = @{
     HyperVSkippedMarker = 'C:\GitLab-Runner\.hyperv_skipped'
 
     # --- Thresholds ---
-    StaleMinutes     = 60
+    # Completion markers are durable: a phase writes its marker only on full
+    # success, so a crash mid-phase leaves no marker and the phase re-runs
+    # naturally. A short window (was 60) only risked re-running an already-
+    # complete phase when Be1 paused between reboots. 1 year = never expire.
+    StaleMinutes     = 525600
     PagefileMaxMB    = 32768
 
     # --- Runner defaults ---
     ConcurrentJobs   = 2
     CheckInterval    = 3
+    # config.toml tuning (was hardcoded in Phase 3). Process isolation,
+    # WS2019 host + ltsc2019 containers. ShmSize in bytes (256 MB).
+    Runner = @{
+        ShutdownTimeout        = 300
+        LogLevel               = 'info'
+        PullPolicy             = 'if-not-present'
+        Isolation              = 'process'
+        Privileged             = $false
+        TlsVerify              = $false
+        ShmSize                = 268435456
+        WaitForServicesTimeout = 30
+        DisableCache           = $false
+        CacheType              = ''
+    }
 
     # --- MinIO object keys ---
     # --- MinIO object keys -- core binaries + maintenance scripts ---
