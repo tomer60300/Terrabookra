@@ -89,13 +89,20 @@ try {
 
 # --- .NET ZipFile (zip extraction is load-bearing) ---------------------------
 try {
-    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-    if ([Type]::GetType('System.IO.Compression.ZipFile, System.IO.Compression.FileSystem')) {
+    # Load the assembly the SAME way the extraction code does (Install-Tools,
+    # Enable-RemoteSSH, Install-Observability). -ErrorAction Stop so a genuine
+    # load failure is reported here instead of being masked.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    # Resolve via PowerShell's own type system (searches loaded assemblies).
+    # The old [Type]::GetType('...,System.IO.Compression.FileSystem') probe used
+    # a PARTIAL assembly name and returned $null on WS2019 even though the type
+    # is fully usable -- a false-positive HARD failure that aborted the run.
+    if ('System.IO.Compression.ZipFile' -as [type]) {
         Write-Check PASS '.NET System.IO.Compression.ZipFile available'
     } else {
-        Write-Check FAIL '.NET ZipFile type unavailable -- zip extraction (Docker/tools) will fail'
+        Write-Check FAIL '.NET ZipFile type unavailable after loading assembly -- zip extraction (Docker/tools) will fail'
     }
-} catch { Write-Check FAIL ".NET ZipFile probe failed: $($_.Exception.Message)" }
+} catch { Write-Check FAIL ".NET ZipFile assembly failed to load: $($_.Exception.Message)" }
 
 # --- Locate + load Config ----------------------------------------------------
 if (-not $Script:Config) {
