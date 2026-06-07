@@ -133,23 +133,33 @@ function Invoke-Phase3 {
             ForEach-Object { Write-Log "  docker login: $_" }
     }
 
+    # Each image pulls in its OWN background job (parallel), STREAMING docker's
+    # per-layer progress to a dedicated log file so the wait below can show live
+    # progress + a heartbeat. Windows base images are multi-GB and windowsfilter
+    # extraction is slow -- this is the dominant cold-provision cost (~20-40 min).
     $Script:PrePullJobs   = @()
     $Script:PrePullStartT = Get-Date
     foreach ($image in $Script:Config.PrePullImages) {
         $shortName = ($image -split '/')[-1] -replace ':', '-'
         $jobName   = "prepull-$shortName"
-        $Script:PrePullJobs += Start-Job -Name $jobName -ArgumentList $image -ScriptBlock {
-            param($Image)
-            $output = docker pull $Image 2>&1
-            [PSCustomObject]@{
-                Image    = $Image
-                ExitCode = $LASTEXITCODE
-                Output   = ($output | Out-String)
+        $jobLog    = Join-Path $Script:Config.LogsDir "pull-$shortName.log"
+        Remove-Item $jobLog -Force -ErrorAction SilentlyContinue
+        $Script:PrePullJobs += Start-Job -Name $jobName -ArgumentList $image, $jobLog -ScriptBlock {
+            param($Image, $LogFile)
+            $t0 = Get-Date
+            "[$($t0.ToString('HH:mm:ss'))] PULL START $Image" | Out-File -FilePath $LogFile -Encoding UTF8
+            # Non-TTY 'docker pull' emits discrete per-layer lines (Pulling/Downloading/Extracting/Pull complete)
+            docker pull $Image 2>&1 | ForEach-Object {
+                "[$([DateTime]::Now.ToString('HH:mm:ss'))] $_" | Out-File -FilePath $LogFile -Append -Encoding UTF8
             }
+            $ec   = $LASTEXITCODE
+            $secs = [int]((Get-Date) - $t0).TotalSeconds
+            "[$([DateTime]::Now.ToString('HH:mm:ss'))] PULL END exit=$ec (${secs}s)" | Out-File -FilePath $LogFile -Append -Encoding UTF8
+            [PSCustomObject]@{ Image = $Image; ExitCode = $ec; Seconds = $secs; LogFile = $LogFile }
         }
-        Write-Log "  Started: $jobName ($image)"
+        Write-Log "  Started: $jobName ($image) -> live log $jobLog"
     }
-    Write-Log "  $($Script:PrePullJobs.Count) parallel pull job(s) running in background -- continuing with other Phase 3 work..."
+    Write-Log "  $($Script:PrePullJobs.Count) parallel pull job(s) running -- other Phase 3 work continues; progress heartbeat at step 3.14.5."
     Write-Log ''
 
     # -- 3.6 Write config.toml --------------------------------
@@ -479,32 +489,75 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     # caps total Phase 3 wall time.
     if ($Script:PrePullJobs -and $Script:PrePullJobs.Count -gt 0) {
         Write-Log ''
-        Write-Log "Waiting for $($Script:PrePullJobs.Count) pre-pull job(s) (started in step 3.5)..."
-        $pullResults = $Script:PrePullJobs | Wait-Job | ForEach-Object {
-            $r = Receive-Job -Job $_
-            Remove-Job -Job $_
-            $r
-        }
-        $pullElapsed = ((Get-Date) - $Script:PrePullStartT).TotalSeconds
-        Write-Log "  All pre-pull jobs done. Wall time since step 3.5 start: $([math]::Round($pullElapsed,1))s"
-
-        $pullFailures = 0
-        foreach ($r in $pullResults) {
-            $tail = ($r.Output -split "`n" | Where-Object { $_ } | Select-Object -Last 3)
-            if ($r.ExitCode -eq 0) {
-                Write-Log "  [OK]   $($r.Image)"
-                $tail | ForEach-Object { Write-Log "    $_" }
-            } else {
-                Write-LogError "  [FAIL] $($r.Image) (exit $($r.ExitCode))"
-                $tail | ForEach-Object { Write-LogError "    $_" }
-                $pullFailures++
+        Write-Log "Waiting for $($Script:PrePullJobs.Count) pre-pull job(s) (started in step 3.5)."
+        Write-Log '  WHY THIS IS SLOW: Windows base images are huge (servercore ~5GB, windows ~9GB on'
+        Write-Log '  disk) and every layer is extracted by the windowsfilter driver. Heartbeat every 30s:'
+        $hb = 30; $next = $hb
+        $running = @($Script:PrePullJobs)
+        $pullResults = @()
+        while ($running.Count -gt 0) {
+            Start-Sleep -Seconds 5
+            $elapsed = [int]((Get-Date) - $Script:PrePullStartT).TotalSeconds
+            foreach ($j in @($running | Where-Object { $_.State -ne 'Running' })) {
+                $r = Receive-Job -Job $j; Remove-Job -Job $j -Force -ErrorAction SilentlyContinue
+                $pullResults += $r
+                if ($r.ExitCode -eq 0) {
+                    $szTxt = ''
+                    $sz = docker image inspect $r.Image --format '{{.Size}}' 2>$null
+                    if ("$sz" -match '^\d+$') { $szTxt = (' | {0:N2} GB on disk' -f ([double]$sz / 1GB)) }
+                    Write-Log "  [DONE $($r.Seconds)s] $($r.Image)$szTxt"
+                } else {
+                    Write-LogError "  [FAIL $($r.Seconds)s] $($r.Image) (exit $($r.ExitCode)) -- last log lines:"
+                    if (Test-Path $r.LogFile) { Get-Content $r.LogFile -Tail 6 | ForEach-Object { Write-LogError "      $_" } }
+                }
+            }
+            $running = @($running | Where-Object { $_.State -eq 'Running' })
+            if ($running.Count -gt 0 -and $elapsed -ge $next) {
+                Write-Log "  ... still pulling after ${elapsed}s ($($running.Count) running):"
+                foreach ($j in $running) {
+                    $img  = ($j.Name -replace '^prepull-', '')
+                    $jlog = Join-Path $Script:Config.LogsDir "pull-$img.log"
+                    $last = if (Test-Path $jlog) { (Get-Content $jlog -Tail 1) } else { '(starting...)' }
+                    Write-Log "      $img : $last"
+                }
+                $next += $hb
             }
         }
+        $pullElapsed = [int]((Get-Date) - $Script:PrePullStartT).TotalSeconds
+        Write-Log "  All pre-pull jobs finished in ${pullElapsed}s (since step 3.5)."
+        $pullFailures = @($pullResults | Where-Object { $_.ExitCode -ne 0 }).Count
         if ($pullFailures -gt 0) {
             Write-LogError "FATAL: $pullFailures Harbor image(s) failed to pull. In air-gapped environment images must be pre-pulled."
             Write-LogError '  Verify Harbor connectivity, credentials, and that images exist in the registry.'
             exit 1
         }
+    }
+
+    # -- 3.14.7 Runner VM theme (cosmetic, NON-BLOCKING) ------
+    # Distinct desktop look so a runner is obvious vs a local box. An org GPO
+    # reverts personal appearance, so we register a logon + 20-min task that
+    # re-applies it in the interactive user's context. Fully guarded: a theme
+    # problem NEVER fails provisioning (no ProvisioningFailed), and the script
+    # itself always exits 0.
+    Write-Log '3.14.7 Runner theme (cosmetic, non-blocking)'
+    try {
+        $themeScr = Join-Path $Script:Config.ScriptsDir 'Set-RunnerTheme.ps1'
+        if (-not (Test-Path $themeScr)) {
+            Get-S3Object -Key $Script:Config.S3KeysExtra.ThemeScript -OutFile $themeScr | Out-Null
+        }
+        if (Test-Path $themeScr) {
+            $thPrin    = New-ScheduledTaskPrincipal -GroupId 'S-1-5-4' -RunLevel Limited   # INTERACTIVE user
+            $thAtLogon = New-ScheduledTaskTrigger -AtLogOn
+            $thEvery   = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 20) -RepetitionDuration (New-TimeSpan -Days 3650)
+            $thAct     = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$themeScr`""
+            $thSet     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+            Register-ScheduledTask -TaskName 'Runner-Theme-Apply' -Action $thAct -Trigger @($thAtLogon, $thEvery) -Principal $thPrin -Settings $thSet -Force | Out-Null
+            Write-Log '  Runner-Theme-Apply registered (logon + every 20 min, interactive user)'
+        } else {
+            Write-LogWarn '  Set-RunnerTheme.ps1 unavailable -- skipping theme (non-blocking)'
+        }
+    } catch {
+        Write-LogWarn "  Theme setup failed (non-blocking, ignored): $($_.Exception.Message)"
     }
 
     # -- 3.15 Final validation --------------------------------

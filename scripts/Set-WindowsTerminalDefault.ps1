@@ -178,6 +178,36 @@ Set-Shortcut -LinkPath (Join-Path $defaultStart 'Command Prompt (Terminal).lnk')
              -Target $wtExe -Args '-p "Command Prompt"'
 Write-Step '  Default User Start Menu shortcuts created (PowerShell + CMD via Terminal)'
 
+# ============================================================
+# 6. All-Users Start Menu shortcuts -- searchable for EVERY user immediately
+#    (the Default-User entries above only appear for NEW profiles). This is
+#    what puts "Windows Terminal" + CMD/PowerShell-in-Terminal in Search.
+# ============================================================
+$allUsersStart = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'
+Set-Shortcut -LinkPath (Join-Path $allUsersStart 'Windows Terminal.lnk')              -Target $wtExe -Args ''
+Set-Shortcut -LinkPath (Join-Path $allUsersStart 'Command Prompt (Terminal).lnk')     -Target $wtExe -Args '-p "Command Prompt"'
+Set-Shortcut -LinkPath (Join-Path $allUsersStart 'Windows PowerShell (Terminal).lnk') -Target $wtExe -Args '-p "Windows PowerShell"'
+Write-Step '  All-Users Start Menu shortcuts created (searchable for every user)'
+
+# ============================================================
+# 7. Default-terminal delegation (best-effort). On Windows 11 / Server 2022+
+#    the "Default terminal application" is chosen via these HKCU keys, making
+#    CMD/PowerShell auto-host in Windows Terminal. WS2019 has no such feature,
+#    so the keys are simply ignored there (harmless) -- the Start Menu
+#    shortcuts are the WS2019 mechanism for "CMD in Terminal".
+# ============================================================
+$WT_CONSOLE  = '{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}'   # Windows Terminal
+$WT_TERMINAL = '{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}'
+try {
+    $startup = 'Registry::HKEY_CURRENT_USER\Console\%%Startup'
+    if (-not (Test-Path $startup)) { New-Item -Path $startup -Force | Out-Null }
+    New-ItemProperty -Path $startup -Name 'DelegationConsole'  -Value $WT_CONSOLE  -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $startup -Name 'DelegationTerminal' -Value $WT_TERMINAL -PropertyType String -Force | Out-Null
+    Write-Step '  Default-terminal keys set (honored on Win11/Server 2022+; ignored on WS2019)'
+} catch {
+    Write-Step "  WARN: default-terminal keys failed: $($_.Exception.Message)" 'WARN'
+}
+
 Write-Step '========== Set-WindowsTerminalDefault COMPLETE =========='
 Write-Output ''
 Write-Output 'Coverage:'

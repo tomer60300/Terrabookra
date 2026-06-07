@@ -201,6 +201,7 @@ $Script:Config = @{
         SetWtDefault         = 'scripts/Set-WindowsTerminalDefault.ps1'
         DepValidator         = 'validation/Test-Dependencies.ps1'
         AssertEnv            = 'scripts/Assert-Environment.ps1'
+        ThemeScript          = 'scripts/Set-RunnerTheme.ps1'
 
         # --- OpenCode + WebView2 ---------------------------------------------
         WebView2Exe          = 'tools/opencode/MicrosoftEdgeWebView2RuntimeInstallerX64.exe'

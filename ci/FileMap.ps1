@@ -52,6 +52,7 @@ $Script:FileMap = [ordered]@{
     'scripts/Install-OpenCode.ps1'             = 'scripts/Install-OpenCode.ps1'
     'scripts/Install-Observability.ps1'        = 'scripts/Install-Observability.ps1'
     'scripts/Assert-Environment.ps1'           = 'scripts/Assert-Environment.ps1'
+    'scripts/Set-RunnerTheme.ps1'              = 'scripts/Set-RunnerTheme.ps1'
     'scripts/Set-WindowsTerminalDefault.ps1'   = 'scripts/Set-WindowsTerminalDefault.ps1'
 
     # --- tools (config files only -- binaries are uploaded out-of-band via USB) ---
