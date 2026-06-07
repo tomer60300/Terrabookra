@@ -53,7 +53,7 @@
 #>
 
 function Invoke-FinalValidation {
-    $pass = 0; $fail = 0; $total = 0
+    $script:pass = 0; $script:fail = 0; $script:total = 0
 
     function Check {
         param([string]$Name, [scriptblock]$Test)
@@ -91,7 +91,10 @@ function Invoke-FinalValidation {
     }
     Check 'Health-Check exec-limit = 2h' {
         $st = Get-ScheduledTask -TaskName 'Health-Check' -ErrorAction SilentlyContinue
-        $st -and $st.Settings.ExecutionTimeLimit -eq 'PT2H'
+        if (-not $st -or -not $st.Settings.ExecutionTimeLimit) { return $false }
+        # Parse the ISO-8601 duration -- Task Scheduler may store 'PT2H' or 'PT2H0M0S'
+        try { ([System.Xml.XmlConvert]::ToTimeSpan($st.Settings.ExecutionTimeLimit)).TotalHours -eq 2 }
+        catch { $false }
     }
     Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
     Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
