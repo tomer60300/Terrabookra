@@ -36,7 +36,7 @@ $source = 'GitLabRunner'
 # failure so Phase 1's $LASTEXITCODE gate aborts before writing its marker --
 # an untrusted internal CA breaks Harbor/GitLab TLS on the air-gapped runner.
 $dlFailures     = 0
-$importFailures = 0'
+$importFailures = 0
 
 # -- Ensure certs directory exists ----------------------------
 if (-not (Test-Path $CertsDir)) {
