@@ -277,15 +277,16 @@ function Set-PhaseMarker {
 
 function Test-PhaseComplete {
     <#
-    .SYNOPSIS  Check if a phase marker exists and is fresh (< StaleMinutes old).
+    .SYNOPSIS  Return $true iff a phase-completion marker exists.
+    .DESCRIPTION
+        Completion markers are DURABLE and never expire. A phase writes its
+        marker only after fully succeeding, so the marker's presence is a
+        permanent "this phase is done" fact. There is no mid-phase marker, so a
+        crash before completion leaves no marker and the phase re-runs on the
+        next boot naturally -- no time-based staleness needed. (A prior version
+        deleted markers older than StaleMinutes, which could wrongly re-run a
+        completed phase on an old golden image or restored snapshot.)
     #>
     param([string]$Path)
-    if (-not (Test-Path $Path)) { return $false }
-    $age = (Get-Date) - (Get-Item $Path).LastWriteTime
-    if ($age.TotalMinutes -gt $Script:Config.StaleMinutes) {
-        Write-LogWarn "Phase marker $Path is stale ($([int]$age.TotalMinutes) min). Re-running phase."
-        Remove-Item $Path -Force
-        return $false
-    }
-    return $true
+    return (Test-Path $Path)
 }

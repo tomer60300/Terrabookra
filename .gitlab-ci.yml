@@ -37,8 +37,10 @@
 #                              MINIO_BUCKET. When unset, bootstrap goes to
 #                              MINIO_BUCKET/Bootstrap-GitLabRunner.ps1.
 #
-#      ALIAS SUBSTITUTION (optional but recommended -- lets the public repo
-#      hold aliases while internal CI publishes real hostnames to MinIO):
+#      ALIAS SUBSTITUTION (defense-in-depth backstop -- NOT a way to run CI on
+#      an alias-form repo; stage 1 validate-no-aliases blocks that first. This
+#      internal repo must already hold real hostnames. These optionally rewrite
+#      any residual alias at publish time):
 #        REAL_HARBOR_HOST    = <real Harbor FQDN>      (replaces 'harbor.kayhut.com')
 #        REAL_GITLAB_HOST    = <real GitLab FQDN>      (replaces 'gitlab.kayhut.com')
 #        REAL_MINIO_HOST     = <real MinIO FQDN>       (replaces 'kayhut-minio.com')
@@ -50,7 +52,8 @@
 #      alias passes through unchanged. Logic lives in ci/Substitute-Aliases.ps1
 #      and runs identically in sync-to-minio (rewrites bytes before PUT) and
 #      verify-minio (rewrites local bytes before MD5 compare, so content-match
-#      still works).
+#      still works). Because stage 1 already blocks aliases, in normal
+#      operation this substitution is a no-op safety net.
 #
 #   2. Ensure the runner tag matches your Windows runner
 

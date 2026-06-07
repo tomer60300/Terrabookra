@@ -32,6 +32,12 @@ if (-not $CertsDir) { $CertsDir = 'C:\GitLab-Runner\certs' }
 $ErrorActionPreference = 'Continue'
 $source = 'GitLabRunner'
 
+# Failure counters. This script MUST exit non-zero on any download/import
+# failure so Phase 1's $LASTEXITCODE gate aborts before writing its marker --
+# an untrusted internal CA breaks Harbor/GitLab TLS on the air-gapped runner.
+$dlFailures     = 0
+$importFailures = 0'
+
 # -- Ensure certs directory exists ----------------------------
 if (-not (Test-Path $CertsDir)) {
     New-Item -Path $CertsDir -ItemType Directory -Force | Out-Null
@@ -58,6 +64,7 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
             Write-Output "  [DL] $certKey -> $destPath"
         } else {
             Write-Output "  [FAIL] Could not download $certKey from S3"
+            $dlFailures++
             Write-EventLog -LogName Application -Source $source -EventId 9022 -EntryType Warning `
                 -Message "Certificate S3 download failed: $certKey"
         }
@@ -72,8 +79,12 @@ $certFiles = Get-ChildItem -Path $CertsDir -File | Where-Object {
 }
 
 if ($certFiles.Count -eq 0) {
-    Write-Output "No certificate files (.crt/.cer/.pem) found in $CertsDir"
-    return
+    if (($s3Certs -and $s3Certs.Count -gt 0) -or $dlFailures -gt 0) {
+        Write-Output "FATAL: certificates are configured but none are present in $CertsDir (download failures: $dlFailures)."
+        exit 1
+    }
+    Write-Output "No certificate files (.crt/.cer/.pem) found in $CertsDir, and none configured -- nothing to import."
+    exit 0
 }
 
 $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
@@ -106,10 +117,18 @@ foreach ($file in $certFiles) {
     }
     catch {
         Write-Output "  [FAIL] $($file.Name) -- $_"
+        $importFailures++
         Write-EventLog -LogName Application -Source $source -EventId 9021 -EntryType Warning `
             -Message "Certificate import failed: $($file.Name) | Error: $_"
     }
 }
 
 $store.Close()
-Write-Output "Certificate import complete: $imported imported, $skipped skipped"
+Write-Output "Certificate import complete: $imported imported, $skipped skipped, $importFailures failed (download failures: $dlFailures)"
+
+# Exit non-zero on ANY failure so the Phase 1 gate aborts before the marker.
+if ($dlFailures -gt 0 -or $importFailures -gt 0) {
+    Write-Output "FATAL: certificate provisioning incomplete -- $dlFailures download, $importFailures import failure(s)."
+    exit 1
+}
+exit 0

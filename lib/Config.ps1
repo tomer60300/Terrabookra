@@ -127,11 +127,10 @@ $Script:Config = @{
     HyperVSkippedMarker = 'C:\GitLab-Runner\.hyperv_skipped'
 
     # --- Thresholds ---
-    # Completion markers are durable: a phase writes its marker only on full
-    # success, so a crash mid-phase leaves no marker and the phase re-runs
-    # naturally. A short window (was 60) only risked re-running an already-
-    # complete phase when Be1 paused between reboots. 1 year = never expire.
-    StaleMinutes     = 525600
+    # Completion markers are DURABLE and never expire -- Test-PhaseComplete
+    # checks existence only. A phase writes its marker just once, on full
+    # success; a crash mid-phase leaves no marker and the phase re-runs on the
+    # next boot. No time-based staleness (StaleMinutes is retired).
     PagefileMaxMB    = 32768
 
     # --- Runner defaults ---
