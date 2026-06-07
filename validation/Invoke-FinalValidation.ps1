@@ -60,9 +60,9 @@ function Invoke-FinalValidation {
         $script:total++
         try {
             if (& $Test) { Write-Log "  [PASS] $Name"; $script:pass++ }
-            else          { Write-Log "  [FAIL] $Name" -Level 'WARN'; $script:fail++ }
+            else          { Write-Log "  [FAIL] $Name" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
         }
-        catch { Write-Log "  [FAIL] $Name -- $_" -Level 'WARN'; $script:fail++ }
+        catch { Write-Log "  [FAIL] $Name -- $_" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
     }
 
     Check 'OS Build = 17763'            { [System.Environment]::OSVersion.Version.Build -eq 17763 }

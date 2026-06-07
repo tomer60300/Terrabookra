@@ -510,6 +510,9 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     # -- 3.15 Final validation --------------------------------
     Write-Log '========== FINAL VALIDATION =========='
     Invoke-FinalValidation
+    if ($Script:ProvisioningFailed) {
+        Write-LogError 'Final validation reported one or more failed checks -- runner will be marked DEGRADED.'
+    }
 
     # -- 3.16 Write golden image version stamp ----------------
     Write-Log '3.16 Write golden image version stamp'
