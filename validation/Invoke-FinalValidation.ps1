@@ -138,13 +138,14 @@ function Invoke-FinalValidation {
         [System.Environment]::GetEnvironmentVariable('OPENCODE_CONFIG','Machine') -eq $Script:Config.OpenCodeMachineFile
     }
 
-    Write-Log "Validation: $pass/$total passed, $fail failed"
+    Write-Log "Validation: $script:pass/$script:total passed, $script:fail failed"
 
-    if ($fail -gt 0) {
+    if ($script:fail -gt 0) {
+        $Script:ProvisioningFailed = $true   # block the terminal Phase3 marker on any validation failure
         Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9010 -EntryType Warning `
-            -Message "Validation: $fail of $total checks failed."
+            -Message "Validation: $script:fail of $script:total checks failed."
     } else {
         Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9011 -EntryType Information `
-            -Message "Validation: ALL $total checks passed."
+            -Message "Validation: ALL $script:total checks passed."
     }
 }
