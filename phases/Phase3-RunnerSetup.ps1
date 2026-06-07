@@ -133,6 +133,56 @@ function Invoke-Phase3 {
             ForEach-Object { Write-Log "  docker login: $_" }
     }
 
+    # --- GitLab Container Registry login (pull+push) ---------------------------
+    # Non-fatal by design: on failure we log WHY in detail and continue, so a
+    # registry hiccup never blocks the golden image. Runs as SYSTEM, so the auth
+    # lands in the systemprofile .docker\config.json the runner service inherits.
+    if ($Script:Config.GitLabRegistryUser -and $Script:Config.GitLabRegistryPass) {
+        $glReg = $Script:Config.GitLabRegistry
+        Write-Log "Logging into GitLab registry $glReg as '$($Script:Config.GitLabRegistryUser)'..."
+        $glOut  = $Script:Config.GitLabRegistryPass |
+                  docker login $glReg -u $Script:Config.GitLabRegistryUser --password-stdin 2>&1
+        $glCode = $LASTEXITCODE
+        $glOut | ForEach-Object { Write-Log "  docker login: $_" }
+        if ($glCode -eq 0) {
+            Write-Log "GitLab registry login OK ($glReg)"
+        } else {
+            Write-LogWarn "GitLab registry login FAILED (exit $glCode) -- continuing; private GitLab images will fail to pull/push until fixed."
+            Write-LogWarn "  Registry : $glReg"
+            Write-LogWarn "  User     : $($Script:Config.GitLabRegistryUser)  (password redacted)"
+            Write-LogWarn "  Output   : $(($glOut | Out-String).Trim())"
+            $glHost = ($glReg -split ':')[0]
+            $glPort = if ($glReg -match ':(\d+)$') { [int]$Matches[1] } else { 443 }
+            try {
+                $glDns = [System.Net.Dns]::GetHostAddresses($glHost) | ForEach-Object { $_.IPAddressToString }
+                Write-LogWarn "  DNS      : $glHost -> $($glDns -join ', ')"
+            } catch { Write-LogWarn "  DNS      : $glHost -> RESOLVE FAILED ($($_.Exception.Message))" }
+            try {
+                $glTcp = New-Object System.Net.Sockets.TcpClient
+                $glAr  = $glTcp.BeginConnect($glHost, $glPort, $null, $null)
+                $glOk  = $glAr.AsyncWaitHandle.WaitOne(3000) -and $glTcp.Connected
+                Write-LogWarn "  TCP      : ${glHost}:${glPort} reachable = $glOk"
+                $glTcp.Close()
+            } catch { Write-LogWarn "  TCP      : ${glHost}:${glPort} probe error: $($_.Exception.Message)" }
+            $glInfo = (docker info 2>&1 | Out-String)
+            if ($glInfo -match [regex]::Escape($glReg)) {
+                Write-LogWarn "  Insecure : '$glReg' is in 'docker info' (insecure-registries OK)"
+            } else {
+                Write-LogWarn "  Insecure : '$glReg' NOT listed by 'docker info' -- if a TLS/x509 error appears above, that is the cause"
+            }
+            switch -Regex (($glOut | Out-String)) {
+                'unauthorized|HTTP Basic: Access denied|access forbidden' { Write-LogWarn '  Likely   : wrong/expired token or missing read_registry. Check User = token NAME, token not revoked.' ; break }
+                'denied: requested access'                                { Write-LogWarn '  Likely   : token role too low for push -- need Developer+ with write_registry scope.' ; break }
+                'x509|certificate signed by unknown|tls: '                { Write-LogWarn "  Likely   : registry cert not trusted. Confirm $glReg is in daemon.json insecure-registries, or import its CA." ; break }
+                'connection refused|no route to host|timeout|i/o timeout' { Write-LogWarn '  Likely   : registry service down, wrong port, or firewall blocking the registry port.' ; break }
+                'no such host|name resolution|cannot resolve'             { Write-LogWarn '  Likely   : DNS/hosts entry for the registry host is missing.' ; break }
+                default                                                   { Write-LogWarn '  Likely   : inspect the docker output above -- check token, scope, connectivity, and TLS.' }
+            }
+        }
+    } else {
+        Write-Log 'GitLab registry login skipped (GitLabRegistryUser/Pass not set in Config).'
+    }
+
     # Each image pulls in its OWN background job (parallel), STREAMING docker's
     # per-layer progress to a dedicated log file so the wait below can show live
     # progress + a heartbeat. Windows base images are multi-GB and windowsfilter

@@ -67,6 +67,15 @@ $Script:Config = @{
     # --- Hosts (for InsecureRegistries + MonitorHosts) ---
     GitLabRegistry   = $_gitLabRegistry
     ArtifactoryHost  = $_artifactoryHost
+
+    # --- GitLab Container Registry login (Phase 3 step 3.5; pull+push) ---
+    # Project/Group Access Token: User = token name, Pass = token value.
+    # Role Developer+ with scopes read_registry + write_registry.
+    # Placeholders here -- fill the real values on the internal/deploy copy only.
+    # Login is non-fatal: a failure is logged verbosely and provisioning continues.
+    GitLabRegistryUser = ''
+    GitLabRegistryPass = ''
+
     Be1Host          = $_be1Host
 
     # --- Paths (C: drive -- OS, binaries, tools) ---
