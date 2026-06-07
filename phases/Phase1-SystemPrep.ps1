@@ -53,25 +53,26 @@ function Invoke-Phase1 {
     Write-Log '1.0 Pre-flight dependency validation (DNS + S3 + Harbor)'
     $depScript = Join-Path $PSScriptRoot '..\validation\Test-Dependencies.ps1'
     if (-not (Test-Path $depScript)) {
-        # Fallback: try to fetch from S3
-        $depScriptLocal = Join-Path $Script:Config.ScriptsDir 'Test-Dependencies.ps1'
-        if (-not (Test-Path $depScriptLocal)) {
-            Get-S3Object -Key $Script:Config.S3KeysExtra.DepValidator -OutFile $depScriptLocal | Out-Null
+        $depScript = Join-Path $Script:Config.ScriptsDir 'Test-Dependencies.ps1'
+        if (-not (Test-Path $depScript)) {
+            if (-not (Get-S3Object -Key $Script:Config.S3KeysExtra.DepValidator -OutFile $depScript)) {
+                Write-LogError 'FATAL: could not fetch Test-Dependencies.ps1 -- pre-flight validation is mandatory'
+                exit 1
+            }
         }
-        $depScript = $depScriptLocal
     }
-    if (Test-Path $depScript) {
-        # Run in subprocess -- Test-Dependencies.ps1 uses exit which would kill us
-        $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript 2>&1
-        $depExit   = $LASTEXITCODE
-        $depResult | ForEach-Object { Write-Log "  dep: $_" }
-        if ($depExit -ne 0) {
-            Write-LogError "FATAL: Dependency validation failed ($depExit). Cannot provision without all dependencies."
-            Write-LogError '  Fix: ensure DNS, MinIO objects, and Harbor images are all reachable, then re-run.'
-            exit 1
-        }
-    } else {
-        Write-LogWarn 'Test-Dependencies.ps1 not found -- skipping pre-flight check'
+    if (-not (Test-Path $depScript)) {
+        Write-LogError 'FATAL: Test-Dependencies.ps1 not available -- cannot validate dependencies'
+        exit 1
+    }
+    # Run in subprocess -- Test-Dependencies.ps1 uses exit which would kill us
+    $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript 2>&1
+    $depExit   = $LASTEXITCODE
+    $depResult | ForEach-Object { Write-Log "  dep: $_" }
+    if ($depExit -ne 0) {
+        Write-LogError "FATAL: Dependency validation failed ($depExit). Cannot provision without all dependencies."
+        Write-LogError '  Fix: ensure DNS, MinIO objects, and Harbor images are all reachable, then re-run.'
+        exit 1
     }
 
     # -- 1.1 Event Log source ---------------------------------

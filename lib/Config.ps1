@@ -120,6 +120,7 @@ $Script:Config = @{
     # --- Phase Markers ---
     Phase1Marker     = 'C:\GitLab-Runner\.phase1_complete'
     Phase2Marker     = 'C:\GitLab-Runner\.phase2_complete'
+    Phase3Marker     = 'C:\GitLab-Runner\.phase3_complete'
     # Set by Phase 1 step 1.9 when the host doesn't expose VT-x; read by
     # Invoke-FinalValidation in Phase 3 (different process after the reboot,
     # so an in-memory variable wouldn't survive).

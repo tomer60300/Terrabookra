@@ -285,7 +285,11 @@ try {
     Write-Log '============================================'
 
     # --- Phase dispatch based on marker files ---
-    if (Test-PhaseComplete $Script:Config.Phase2Marker) {
+    if (Test-Path $Script:Config.Phase3Marker) {
+        Write-Log 'Phase 3 marker found -> runner already fully provisioned. Nothing to do.'
+        exit 0
+    }
+    elseif (Test-PhaseComplete $Script:Config.Phase2Marker) {
         Write-Log 'Phase 2 marker found -> dispatching Phase 3'
         Invoke-Phase3
     }

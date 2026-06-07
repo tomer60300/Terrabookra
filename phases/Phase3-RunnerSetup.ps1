@@ -359,7 +359,8 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         Write-Log "  $s3Skipped script(s) already on disk -- skipped re-fetch"
     }
     if ($s3Failures -gt 0) {
-        Write-LogWarn "S3 script deployment: $s3Failures file(s) failed -- some scheduled tasks may not work"
+        Write-LogError "S3 script deployment: $s3Failures file(s) failed -- maintenance scripts/tasks would be broken"
+        $Script:ProvisioningFailed = $true
     }
     # Create log subdirectories
     foreach ($d in @($Script:Config.JobLogDir, $Script:Config.NetLogDir, $Script:Config.RdpLogDir)) {
@@ -530,6 +531,7 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         Write-LogError 'Exiting with code 1 so Be1 knows this VM is NOT operational.'
         exit 1
     } else {
+        Set-PhaseMarker $Script:Config.Phase3Marker
         Write-Log '========== PHASE 3 COMPLETE -- RUNNER IS OPERATIONAL =========='
     }
 }
