@@ -706,19 +706,32 @@ $summary = [PSCustomObject]@{
     Results  = $results
 }
 
-# Write to Event Log if running during install
-try {
-    if ($failCount -eq 0) {
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9030 -EntryType Information `
-            -Message "Dependency validation: ALL $total checks passed."
-    } else {
-        $failedList = ($results | Where-Object { $_.Status -eq 'FAIL' } |
-            ForEach-Object { "$($_.Category): $($_.Target)" }) -join "`n"
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9031 -EntryType Warning `
-            -Message "Dependency validation: $failCount of $total checks FAILED.`n$failedList"
+# Write to Event Log ONLY when the source is registered. The 'GitLabRunner'
+# source is created during host provisioning (Assert-Environment / Phase 1); it
+# is intentionally ABSENT when this script runs standalone in CI (verify-minio),
+# so we skip event logging there instead of erroring. NOTE: a bare try/catch did
+# NOT help -- "source does not exist" is a NON-terminating error, so with
+# $ErrorActionPreference = 'Continue' it bypassed catch and surfaced in CI.
+# Hence the explicit SourceExists guard plus -ErrorAction Stop.
+$evtSource = 'GitLabRunner'
+$evtSourceExists = $false
+try { $evtSourceExists = [System.Diagnostics.EventLog]::SourceExists($evtSource) } catch { $evtSourceExists = $false }
+if ($evtSourceExists) {
+    try {
+        if ($failCount -eq 0) {
+            Write-EventLog -LogName Application -Source $evtSource -EventId 9030 -EntryType Information -ErrorAction Stop `
+                -Message "Dependency validation: ALL $total checks passed."
+        } else {
+            $failedList = ($results | Where-Object { $_.Status -eq 'FAIL' } |
+                ForEach-Object { "$($_.Category): $($_.Target)" }) -join "`n"
+            Write-EventLog -LogName Application -Source $evtSource -EventId 9031 -EntryType Warning -ErrorAction Stop `
+                -Message "Dependency validation: $failCount of $total checks FAILED.`n$failedList"
+        }
+    } catch {
+        Write-Output "  (event log write skipped: $($_.Exception.Message))"
     }
-} catch {
-    # Event log source may not exist yet on a fresh VM -- that's fine
+} else {
+    Write-Output "  (event log source '$evtSource' not registered -- skipping event log; normal when run standalone/CI)"
 }
 
 Write-Output $summary
