@@ -70,6 +70,29 @@ This project lives in **two separate worlds**. Getting this wrong is the #1 sour
   2. **quote parity** — no unterminated `'`/`"`. A brace check *alone* once missed a stray quote
      (`$x = 0'`) that broke parsing of a whole script.
 - Prefer exact-string patches; keep edits minimal and reviewable.
+- A **PostToolUse hook** now automates this: editing any `.ps1` runs `.claude/verify-ps.ps1`
+  on the **PS 5.1 engine** (`powershell.exe`) — `[Parser]::ParseFile` + PSScriptAnalyzer —
+  and feeds parse/Error findings back. The manual brace/quote checks above are the fallback
+  when the hook can't run. Run `.claude/verify-ps.ps1 -Path <file>` on demand; the `ship`
+  skill runs it before every commit.
+
+## Claude Code tooling (plugins & skills)
+Enabled in `.claude/settings.json`; the repo also ships its own `ps-reviewer` agent and
+`ship` skill. Adapt the plugins to this project's reality:
+- **Superpowers** — keep its planning, **two-stage review**, and **root-cause debugging**
+  as-is. But there is **no unit-test suite here**: wherever a skill's plan→test→code loop
+  expects a failing test, read "the test" as **`verify-ps` passing + the relevant validation**
+  (`validation/Invoke-FinalValidation` as the build gate; `Test-Dependencies` preflight;
+  `Assert-Environment`). Verification is static — don't fabricate a unit-test harness to
+  satisfy a skill.
+- **HashiCorp Packer + Terraform skills** — for the Be1→Packer/Terraform work only
+  (`docs/MIGRATION-TO-TERRAFORM.md`; `docs/BACKLOG.md` Epics 2–3). Use the **Windows-image**
+  Packer skill and honor the constraints: air-gapped, WS2019/ltsc2019, **SSH communicator**
+  (Packer defaults to WinRM, which is GPO-blocked — set SSH explicitly), least-priv vCenter
+  (`svc-packer`/`svc-terraform`), offline provider/plugin mirrors. Don't apply the AWS/Azure
+  builders as-is.
+- **context7 MCP** — pull current Packer/Terraform/provider docs on demand. Dev-leg
+  convenience (internet-only); never a production-leg dependency. Loads after a Claude restart.
 
 ## PS 5.1 pitfalls that have actually bitten this project
 - **Non-terminating errors bypass `try/catch`** under `$ErrorActionPreference='Continue'`.
