@@ -234,6 +234,7 @@ $Script:Config = @{
         InstallTools         = 'scripts/Install-Tools.ps1'
         InstallObservability = 'scripts/Install-Observability.ps1'
         SetWtDefault         = 'scripts/Set-WindowsTerminalDefault.ps1'
+        FirstBootRegister    = 'provisioners/Register-RunnerFirstBoot.ps1'
         DepValidator         = 'validation/Test-Dependencies.ps1'
         AssertEnv            = 'scripts/Assert-Environment.ps1'
         ThemeScript          = 'scripts/Set-RunnerTheme.ps1'

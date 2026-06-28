@@ -208,6 +208,27 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     $skeleton | Out-File -FilePath $Script:Config.ConfigToml -Encoding UTF8 -Force
     Write-Log "  config.toml skeleton written to $($Script:Config.ConfigToml)"
 
+    # -- 3.8 Install the first-boot registration startup task -
+    # Bakes provisioners/Register-RunnerFirstBoot.ps1 onto the image and registers
+    # it as a SYSTEM AtStartup task. At first boot on a deployed clone it reads the
+    # guestinfo runner token + hostname, writes the final config.toml, registers,
+    # and starts the runner service. No service is installed here -- the image
+    # ships unregistered on purpose.
+    Write-Log '3.8 Install first-boot registration startup task'
+    $firstBootDst = Join-Path $Script:Config.ScriptsDir 'Register-RunnerFirstBoot.ps1'
+    if (Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.FirstBootRegister -OutFile $firstBootDst) {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $firstBootDst `
+            -InstallStartupTask -SelfPath $firstBootDst 2>&1 |
+            ForEach-Object { Write-Log "  firstboot: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogError "First-boot task install exited $LASTEXITCODE -- deployed clones would NOT self-register"
+            $Script:ProvisioningFailed = $true
+        }
+    } else {
+        Write-LogError 'FATAL: Register-RunnerFirstBoot.ps1 missing from repo -- clones cannot self-register'
+        $Script:ProvisioningFailed = $true
+    }
+
     # -- 3.9 Deploy maintenance + feature scripts (local copy) -
     Write-Log '3.9 Deploy maintenance + feature scripts from the uploaded repo'
     $s3Failures = 0
