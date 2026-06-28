@@ -23,16 +23,25 @@ $Script:DataDrive = if (Test-Path 'E:\') { 'E:' } else { 'C:' }
 # ============================================================
 # BASE URLs -- Single source of truth for all hostnames/servers.
 # Edit ONLY these variables; everything else derives from them.
+#
+# Decision (3) -- aliases by name resolution, NOT byte substitution:
+# each host reads its $env:REAL_* override and falls back to the public
+# *.kayhut.com alias. The alias STAYS in source on both legs; the internal
+# leg resolves it by hosts/DNS or overrides it via env. There is no
+# Substitute-Aliases publish step anymore.
+#
+# Harbor is RETIRED. Container images (base/helper/app) now come from the
+# GitLab Container Registry ($_gitLabRegistry). $_registryProject is the
+# registry namespace that holds the mirrored golden-image content.
 # ============================================================
 
-$_harborHost       = 'harbor.kayhut.com'
-$_harborProject    = 'golden-image'
-$_gitLabHost       = 'gitlab.kayhut.com'
-$_gitLabRegistry   = "${_gitLabHost}:5050"
-$_minioHost        = 'kayhut-minio.com'
-$_minioPort        = 9000
-$_artifactoryHost  = 'artifactory-prod'
-$_be1Host          = 'be1.kayhut.com'
+$_gitLabHost       = if ($env:REAL_GITLAB_HOST)     { $env:REAL_GITLAB_HOST }     else { 'gitlab.kayhut.com' }
+$_gitLabRegistry   = if ($env:REAL_GITLAB_REGISTRY) { $env:REAL_GITLAB_REGISTRY } else { "${_gitLabHost}:5050" }
+$_registryProject  = if ($env:REAL_REGISTRY_PROJECT){ $env:REAL_REGISTRY_PROJECT }else { 'golden-image' }
+$_minioHost        = if ($env:REAL_MINIO_HOST)      { $env:REAL_MINIO_HOST }      else { 'kayhut-minio.com' }
+$_minioPort        = if ($env:REAL_MINIO_PORT)      { [int]$env:REAL_MINIO_PORT } else { 9000 }
+$_artifactoryHost  = if ($env:REAL_ARTIFACTORY_HOST){ $env:REAL_ARTIFACTORY_HOST }else { 'artifactory-prod' }
+$_be1Host          = if ($env:REAL_BE1_HOST)        { $env:REAL_BE1_HOST }        else { 'be1.kayhut.com' }
 
 # ============================================================
 # CONFIGURATION
@@ -58,11 +67,11 @@ $Script:Config = @{
     #                and extract the resulting auth token.
     GitLabUrl        = "https://${_gitLabHost}"
 
-    # --- Harbor ---
-    HarborUrl        = $_harborHost
-    HarborProject    = $_harborProject
-    HarborUser       = ''
-    HarborPass       = ''
+    # --- Container image registry (GitLab Container Registry; Harbor retired) ---
+    # Base/helper/app images are pulled from here at build time and baked into
+    # the golden image. Login uses GitLabRegistryUser/Pass below.
+    RegistryHost     = $_gitLabRegistry
+    RegistryProject  = $_registryProject
 
     # --- Hosts (for InsecureRegistries + MonitorHosts) ---
     GitLabRegistry   = $_gitLabRegistry
@@ -256,22 +265,20 @@ $Script:Config = @{
 # ============================================================
 
 $Script:Config.PrePullImages = @(
-    "${_harborHost}/${_harborProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809",
-    "${_harborHost}/${_harborProject}/servercore:ltsc2019",
-    "${_harborHost}/${_harborProject}/windows:ltsc2019"
+    "${_gitLabRegistry}/${_registryProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809",
+    "${_gitLabRegistry}/${_registryProject}/servercore:ltsc2019",
+    "${_gitLabRegistry}/${_registryProject}/windows:ltsc2019"
 )
 
-$Script:Config.HelperImage = "${_harborHost}/${_harborProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809"
+$Script:Config.HelperImage = "${_gitLabRegistry}/${_registryProject}/gitlab-runner-helper:x86_64-v16.7.0-servercore1809"
 
 $Script:Config.InsecureRegistries = @(
-    $_harborHost,
     $_gitLabRegistry,
     $_artifactoryHost
 )
 
 $Script:Config.MonitorHosts = @(
     @{ Host = $_gitLabHost;       Port = 443          },
-    @{ Host = $_harborHost;       Port = 443          },
     @{ Host = $_minioHost;        Port = $_minioPort   },
     @{ Host = $_artifactoryHost;  Port = 443          },
     @{ Host = $_be1Host;          Port = 443          }
