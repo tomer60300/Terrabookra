@@ -1,154 +1,158 @@
-﻿<#
+<#
 .SYNOPSIS
-    Final validation -- 17-check suite to confirm the runner is fully operational.
+    Validation, split into two gates:
+      Invoke-FinalValidation  -- BUILD-gate: image-correctness only. Passes on a
+                                 GENERIC, UNREGISTERED golden image. Run at the end
+                                 of Phase3-Install (Packer build).
+      Test-RunnerRegistered   -- DEPLOY-gate: confirms a registered, running runner
+                                 + its dependent services/tasks. Run at first boot
+                                 (Register-RunnerFirstBoot.ps1) / acceptance.
 
 .DESCRIPTION
-    Called at the end of Phase 3. Runs checks against OS, Docker, Runner, Git,
-    Defender, scheduled tasks, and disk. Results are written to the install log
-    and to the Application Event Log.
-
-    Exit criteria:
-      - All 17 checks PASS -> Event 9011 (Info)
-      - Any check FAIL     -> Event 9010 (Warning) -- runner may still work
+    The build-gate must NOT assert anything that requires a runner token: the image
+    ships unregistered, with no runner service. Those checks (service running,
+    `gitlab-runner verify`, the 13 maintenance scheduled tasks, sshd, exporters,
+    runner-metrics firewall) moved to Test-RunnerRegistered, which runs once the
+    clone has self-registered from its guestinfo token.
 
 .NOTES
     File: validation/Invoke-FinalValidation.ps1
     Requires: lib/Config.ps1, lib/Common.ps1 (dot-sourced by orchestrator)
 
-    Checks (fixed-position):
-      1   OS Build = 17763
-      2   Containers feature installed
-      3   Hyper-V feature installed OR intentionally skipped (no VT-x exposed
-          by host -- Phase 1 wrote a marker file)
-      4   Docker service running
-      5   Docker version = 25.0.x
-      6   Docker isolation = process
-      7   Runner binary valid (PE header)
-      8   Runner service running
-      9   Runner verify (is alive)
-      10  Git available
-      11  GIT_SSL_NO_VERIFY set
-      12  Defender exclusions applied
-      13  Helper image present
-      14  Scheduled tasks >= 10
-      15  Power plan = High Performance
-      16  Long paths enabled
-      17  Disk free C: >= 50 GB
-      18  Disk free E: >= 50 GB (when E: present)
+    BUILD-gate checks (image-correctness):
+      OS Build 17763 | Containers + Hyper-V(or skipped) | Docker service/version/
+      isolation=process | runner binary PE | Git + GIT_SSL_NO_VERIFY | Defender
+      exclusions | helper image present | Docker metrics in daemon.json |
+      power plan | long paths | disk C:/E: | tool inventory | WebView2 + OpenCode
+      machine config + OPENCODE_CONFIG.
 
-    Checks (auto-generated from $Config.ToolPackages -- one per tool):
-      19+ Tool: WinRAR / NSSM / Sysinternals / Notepad++ / WinMerge /
-          BareTail / Klogg / Everything / WizTree / SystemInformer /
-          EventLook / Wireshark+tshark / Chrome / WindowsTerminal
-
-    Checks (observability stack):
-      sshd service running (remote control plane -- replaces WinRM)
-      windows_exporter service running (Prometheus host metrics on :9182)
-      blackbox_exporter service running (Prometheus probes on :9115)
-      Runner metrics firewall hole (TCP 9252)
-      Docker metrics-addr present in daemon.json (TCP 9323)
-      WebView2 runtime installed
-      OpenCode machine config file present
-      OPENCODE_CONFIG env var points at machine config
+    DEPLOY-gate checks (registered runner):
+      runner service running | gitlab-runner verify | 13 scheduled tasks +
+      Health-Check exec-limit | sshd | windows_exporter | blackbox_exporter |
+      runner-metrics firewall (TCP 9252).
 #>
 
+# Shared check primitive (script scope on purpose -- PS 5.1 leaks nested function
+# definitions; keeping it at script scope avoids surprises). Increments the
+# script-scoped counters the gate functions reset before running.
+function Invoke-Check {
+    param([string]$Name, [scriptblock]$Test)
+    $script:total++
+    try {
+        if (& $Test) { Write-Log "  [PASS] $Name"; $script:pass++ }
+        else          { Write-Log "  [FAIL] $Name" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
+    }
+    catch { Write-Log "  [FAIL] $Name -- $_" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
+}
+
+function Write-ValidationEvent {
+    # Guard the event-source lookup: on off-host/CI runs the GitLabRunner source
+    # (created by Assert-Environment in Phase 1) may be absent -- Write-EventLog
+    # would then throw a non-terminating error that bypasses try/catch.
+    param([int]$EventId, [string]$EntryType, [string]$Message)
+    try {
+        if ([System.Diagnostics.EventLog]::SourceExists('GitLabRunner')) {
+            Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId $EventId `
+                -EntryType $EntryType -Message $Message -ErrorAction Stop
+        } else {
+            Write-Log "  (event source 'GitLabRunner' absent -- skipping event $EventId)"
+        }
+    } catch { Write-LogWarn "Write-EventLog failed (non-fatal): $_" }
+}
+
 function Invoke-FinalValidation {
+    # BUILD-gate -- image-correctness. Passes on an unregistered image.
     $script:pass = 0; $script:fail = 0; $script:total = 0
 
-    function Check {
-        param([string]$Name, [scriptblock]$Test)
-        $script:total++
-        try {
-            if (& $Test) { Write-Log "  [PASS] $Name"; $script:pass++ }
-            else          { Write-Log "  [FAIL] $Name" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
-        }
-        catch { Write-Log "  [FAIL] $Name -- $_" -Level 'WARN'; $script:fail++; $script:ProvisioningFailed = $true }
-    }
-
-    Check 'OS Build = 17763'            { [System.Environment]::OSVersion.Version.Build -eq 17763 }
-    Check 'Containers feature'          { (Get-WindowsFeature Containers).Installed }
-    # Hyper-V is installed only when the host exposes nested virtualization.
-    # When skipped intentionally (no VT-x), Phase 1 leaves a marker file --
-    # an in-memory variable wouldn't survive the Phase 1 -> Phase 3 reboot.
-    Check 'Hyper-V feature OR skipped'  {
+    Invoke-Check 'OS Build = 17763'            { [System.Environment]::OSVersion.Version.Build -eq 17763 }
+    Invoke-Check 'Containers feature'          { (Get-WindowsFeature Containers).Installed }
+    Invoke-Check 'Hyper-V feature OR skipped'  {
         (Get-WindowsFeature Hyper-V).Installed -or
         (Test-Path $Script:Config.HyperVSkippedMarker)
     }
-    Check 'Docker service running'      { (Get-Service docker -ErrorAction SilentlyContinue).Status -eq 'Running' }
-    Check 'Docker version = 25.0'       { (docker version --format '{{.Server.Version}}' 2>$null) -match '25\.0' }
-    Check 'Docker isolation = process'  { (docker info --format '{{.Isolation}}' 2>$null) -eq 'process' }
-    Check 'Runner binary valid'         { Test-PEBinary $Script:Config.RunnerBin }
-    Check 'Runner service running'      { (Get-Service gitlab-runner -ErrorAction SilentlyContinue).Status -eq 'Running' }
-    Check 'Runner verify (is alive)'    { (& $Script:Config.RunnerBin verify 2>&1 | Out-String) -match 'is alive' }
-    Check 'Git available'               { Test-Path (Join-Path $Script:Config.GitDir 'cmd\git.exe') }
-    Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
-    Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }
-    Check 'Helper image present'        { (docker images $Script:Config.HelperImage --format '{{.Tag}}' 2>$null) -match 'v16.7.0' }
-    Check 'Scheduled tasks (13 required present)' {
-        $required = @('Docker-Image-Prune','Docker-Container-Cleanup','Docker-Stale-Container-Kill','Docker-Volume-Prune','Docker-BuildCache-Prune','Runner-Workspace-Cleanup','Disk-Space-Monitor','Docker-Daemon-Watchdog','Runner-Service-Watchdog','Log-Rotation','Network-Connectivity-Monitor','RDP-Audit-Logger','Health-Check')
-        $have = @((Get-ScheduledTask -ErrorAction SilentlyContinue).TaskName)
-        @($required | Where-Object { $have -notcontains $_ }).Count -eq 0
+    Invoke-Check 'Docker service running'      { (Get-Service docker -ErrorAction SilentlyContinue).Status -eq 'Running' }
+    Invoke-Check 'Docker version = 25.0'       { (docker version --format '{{.Server.Version}}' 2>$null) -match '25\.0' }
+    Invoke-Check 'Docker isolation = process'  { (docker info --format '{{.Isolation}}' 2>$null) -eq 'process' }
+    Invoke-Check 'Runner binary valid'         { Test-PEBinary $Script:Config.RunnerBin }
+    Invoke-Check 'Git available'               { Test-Path (Join-Path $Script:Config.GitDir 'cmd\git.exe') }
+    Invoke-Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
+    Invoke-Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }
+    Invoke-Check 'Helper image present'        { (docker images $Script:Config.HelperImage --format '{{.Tag}}' 2>$null) -match 'v16.7.0' }
+    Invoke-Check 'Docker metrics in daemon.json' {
+        (Get-Content $Script:Config.DaemonJson -Raw -EA SilentlyContinue) -match 'metrics-addr'
     }
-    Check 'Health-Check exec-limit = 2h' {
-        $st = Get-ScheduledTask -TaskName 'Health-Check' -ErrorAction SilentlyContinue
-        if (-not $st -or -not $st.Settings.ExecutionTimeLimit) { return $false }
-        # Parse the ISO-8601 duration -- Task Scheduler may store 'PT2H' or 'PT2H0M0S'
-        try { ([System.Xml.XmlConvert]::ToTimeSpan($st.Settings.ExecutionTimeLimit)).TotalHours -eq 2 }
-        catch { $false }
-    }
-    Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
-    Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
-    Check 'Disk free C: >= 50 GB'       { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }
-    # Check data drive if separate from C:
+    Invoke-Check 'Power plan = High Perf'      { (powercfg /getactivescheme) -match '8c5e7fda' }
+    Invoke-Check 'Long paths enabled'          { (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem').LongPathsEnabled -eq 1 }
+    Invoke-Check 'Disk free C: >= 50 GB'       { [math]::Round((Get-PSDrive C).Free / 1GB) -ge 50 }
     $dd = if (Test-Path 'E:\') { 'E' } else { $null }
     if ($dd) {
-    Check "Disk free ${dd}: >= 50 GB"    { [math]::Round((Get-PSDrive $dd).Free / 1GB) -ge 50 }
+    Invoke-Check "Disk free ${dd}: >= 50 GB"    { [math]::Round((Get-PSDrive $dd).Free / 1GB) -ge 50 }
     }
 
-    # -- Tool inventory: one validation check per row in $Config.ToolPackages.
-    # New tools added to the table automatically appear in validation -- no
-    # edits needed here.
+    # Tool inventory: one check per row in $Config.ToolPackages (auto-extends).
     if ($Script:Config.ToolPackages) {
         foreach ($t in $Script:Config.ToolPackages) {
             $detect = $t.Detect
-            Check ("Tool: $($t.Name)")      { & $detect } | Out-Null
+            Invoke-Check ("Tool: $($t.Name)")  { & $detect } | Out-Null
         }
     }
 
-    # -- Remote control plane -- OpenSSH server (replaces WinRM)
-    Check 'sshd service running'        { (Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running' }
-
-    # -- Observability stack: exporters + metrics endpoints
-    Check 'windows_exporter service'    { (Get-Service windows_exporter  -EA SilentlyContinue).Status -eq 'Running' }
-    Check 'blackbox_exporter service'   { (Get-Service blackbox_exporter -EA SilentlyContinue).Status -eq 'Running' }
-    Check 'Runner metrics firewall'     {
-        [bool](Get-NetFirewallRule -Name 'GitLabRunnerMetrics-In-TCP' -EA SilentlyContinue)
-    }
-    Check 'Docker metrics in daemon.json' {
-        (Get-Content $Script:Config.DaemonJson -Raw -EA SilentlyContinue) -match 'metrics-addr'
-    }
-
-    # -- OpenCode + WebView2 -- machine-wide config plumbing
-    Check 'WebView2 installed'          {
+    # OpenCode + WebView2 -- machine-wide config plumbing (baked at build).
+    Invoke-Check 'WebView2 installed'          {
         @('HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
           'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}') |
             Where-Object { Test-Path $_ } | Select-Object -First 1 |
             ForEach-Object { (Get-ItemProperty -Path $_ -Name pv -EA SilentlyContinue).pv } |
             Where-Object { $_ }
     }
-    Check 'OpenCode machine config'     { Test-Path $Script:Config.OpenCodeMachineFile }
-    Check 'OPENCODE_CONFIG env var'     {
+    Invoke-Check 'OpenCode machine config'     { Test-Path $Script:Config.OpenCodeMachineFile }
+    Invoke-Check 'OPENCODE_CONFIG env var'     {
         [System.Environment]::GetEnvironmentVariable('OPENCODE_CONFIG','Machine') -eq $Script:Config.OpenCodeMachineFile
     }
 
-    Write-Log "Validation: $script:pass/$script:total passed, $script:fail failed"
-
+    Write-Log "Build-gate validation: $script:pass/$script:total passed, $script:fail failed"
     if ($script:fail -gt 0) {
-        $Script:ProvisioningFailed = $true   # block the terminal Phase3 marker on any validation failure
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9010 -EntryType Warning `
-            -Message "Validation: $script:fail of $script:total checks failed."
+        $Script:ProvisioningFailed = $true
+        Write-ValidationEvent -EventId 9010 -EntryType Warning -Message "Build-gate: $script:fail of $script:total checks failed."
     } else {
-        Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9011 -EntryType Information `
-            -Message "Validation: ALL $script:total checks passed."
+        Write-ValidationEvent -EventId 9011 -EntryType Information -Message "Build-gate: ALL $script:total checks passed."
     }
+}
+
+function Test-RunnerRegistered {
+    <#
+    .SYNOPSIS  DEPLOY-gate -- confirm a registered, running runner + dependent
+               services/tasks. Returns [bool] $true iff every check passes.
+    .NOTES     Run at first boot / acceptance, NOT during the build (these assume
+               the clone has self-registered from its guestinfo token).
+    #>
+    $script:pass = 0; $script:fail = 0; $script:total = 0
+
+    Invoke-Check 'Runner service running'      { (Get-Service gitlab-runner -ErrorAction SilentlyContinue).Status -eq 'Running' }
+    Invoke-Check 'Runner verify (is alive)'    { (& $Script:Config.RunnerBin verify 2>&1 | Out-String) -match 'is alive' }
+    Invoke-Check 'Scheduled tasks (13 required present)' {
+        $required = @('Docker-Image-Prune','Docker-Container-Cleanup','Docker-Stale-Container-Kill','Docker-Volume-Prune','Docker-BuildCache-Prune','Runner-Workspace-Cleanup','Disk-Space-Monitor','Docker-Daemon-Watchdog','Runner-Service-Watchdog','Log-Rotation','Network-Connectivity-Monitor','RDP-Audit-Logger','Health-Check')
+        $have = @((Get-ScheduledTask -ErrorAction SilentlyContinue).TaskName)
+        @($required | Where-Object { $have -notcontains $_ }).Count -eq 0
+    }
+    Invoke-Check 'Health-Check exec-limit = 2h' {
+        $st = Get-ScheduledTask -TaskName 'Health-Check' -ErrorAction SilentlyContinue
+        if (-not $st -or -not $st.Settings.ExecutionTimeLimit) { return $false }
+        try { ([System.Xml.XmlConvert]::ToTimeSpan($st.Settings.ExecutionTimeLimit)).TotalHours -eq 2 }
+        catch { $false }
+    }
+    Invoke-Check 'sshd service running'        { (Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running' }
+    Invoke-Check 'windows_exporter service'    { (Get-Service windows_exporter  -EA SilentlyContinue).Status -eq 'Running' }
+    Invoke-Check 'blackbox_exporter service'   { (Get-Service blackbox_exporter -EA SilentlyContinue).Status -eq 'Running' }
+    Invoke-Check 'Runner metrics firewall'     {
+        [bool](Get-NetFirewallRule -Name 'GitLabRunnerMetrics-In-TCP' -EA SilentlyContinue)
+    }
+
+    Write-Log "Deploy-gate validation: $script:pass/$script:total passed, $script:fail failed"
+    if ($script:fail -gt 0) {
+        Write-ValidationEvent -EventId 9012 -EntryType Warning -Message "Deploy-gate: $script:fail of $script:total checks failed."
+        return $false
+    }
+    Write-ValidationEvent -EventId 9013 -EntryType Information -Message "Deploy-gate: ALL $script:total checks passed."
+    return $true
 }
