@@ -82,8 +82,10 @@ $Script:Config = @{
     # Role Developer+ with scopes read_registry + write_registry.
     # Placeholders here -- fill the real values on the internal/deploy copy only.
     # Login is non-fatal: a failure is logged verbosely and provisioning continues.
-    GitLabRegistryUser = ''
-    GitLabRegistryPass = ''
+    # Injected at build time via env (Packer provisioner environment_vars) so the
+    # registry password is never baked into the image (migration doc 5.3).
+    GitLabRegistryUser = if ($env:REAL_GITLAB_REGISTRY_USER) { $env:REAL_GITLAB_REGISTRY_USER } else { '' }
+    GitLabRegistryPass = if ($env:REAL_GITLAB_REGISTRY_PASS) { $env:REAL_GITLAB_REGISTRY_PASS } else { '' }
 
     Be1Host          = $_be1Host
 

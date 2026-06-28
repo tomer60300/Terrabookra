@@ -135,15 +135,16 @@ $registries
         }
     }
 
-    # -- Mark + dispatch --------------------------------------
+    # -- Mark + complete --------------------------------------
     Set-PhaseMarker $Script:Config.Phase2Marker
     Write-Log '========== PHASE 2 COMPLETE =========='
 
+    # Packer owns sequencing: it issues a `windows-restart` after this phase and
+    # then runs Invoke-Phase 3 (Phase3-Install). No self-reboot, no self-chain.
     $dockerSvc = Get-Service docker -ErrorAction SilentlyContinue
     if (-not $dockerSvc -or $dockerSvc.Status -ne 'Running') {
-        Invoke-Be1Reboot -Reason 'Phase 2 complete -- Docker installed, reboot required'
+        Write-Log 'Docker not yet running -- Packer windows-restart will follow before Phase 3.'
     } else {
-        Write-Log 'Docker running, continuing to Phase 3...'
-        Invoke-Phase3
+        Write-Log 'Docker running -- Packer will restart before Phase 3.'
     }
 }

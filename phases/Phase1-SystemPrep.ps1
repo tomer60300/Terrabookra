@@ -268,14 +268,12 @@ function Invoke-Phase1 {
     auditpol /set /subcategory:"Logon" /success:enable /failure:enable 2>$null
     Write-Log 'Logon audit policy enabled'
 
-    # -- Mark + dispatch --------------------------------------
+    # -- Mark + complete --------------------------------------
     Set-PhaseMarker $Script:Config.Phase1Marker
     Write-Log '========== PHASE 1 COMPLETE =========='
 
-    if ($needReboot) {
-        Invoke-Be1Reboot -Reason 'Phase 1 complete -- Windows features require reboot'
-    } else {
-        Write-Log 'No reboot needed, continuing to Phase 2...'
-        Invoke-Phase2
-    }
+    # Packer owns sequencing: it issues a `windows-restart` after this phase and
+    # then runs Invoke-Phase 2. The phase no longer self-reboots or self-chains.
+    if ($needReboot) { Write-Log 'Windows features require a reboot -- Packer windows-restart will follow.' }
+    else             { Write-Log 'No reboot strictly required; Packer still restarts before Phase 2.' }
 }

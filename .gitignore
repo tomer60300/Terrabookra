@@ -9,6 +9,15 @@ tools/sysinternals/
 # Credentials
 *.env
 secrets.json
+# Real Packer/Terraform secret var-files (example.pkrvars.hcl IS committed)
+*.auto.pkrvars.hcl
+secret.pkrvars.hcl
+*.auto.tfvars
+terraform.tfvars
+# Terraform state + local dirs
+.terraform/
+*.tfstate
+*.tfstate.*
 
 # Logs
 *.log
