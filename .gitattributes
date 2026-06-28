@@ -1,0 +1,26 @@
+# Git LFS -- build binaries travel as LFS objects.
+#
+# Two-leg model: on the PUBLIC dev leg (GitHub) the binary trees stay empty --
+# .gitignore keeps real binaries out so nothing licensed/large is ever published.
+# On the INTERNAL leg the binaries are populated (via transfer/Import-Transfer.ps1)
+# and committed to the internal GitLab as LFS objects; the Packer `file`
+# provisioner then uploads them into the golden image. These patterns declare the
+# LFS filter so that wherever a matching binary IS committed, it lands in LFS, not
+# the git object store.
+
+# --- core runtime binaries (Phase 2/3 install) ---
+binaries/**/*.exe          filter=lfs diff=lfs merge=lfs -text
+binaries/**/*.zip          filter=lfs diff=lfs merge=lfs -text
+
+# --- tool + observability packages (Install-Tools / Install-Observability) ---
+tools/**/*.exe             filter=lfs diff=lfs merge=lfs -text
+tools/**/*.zip             filter=lfs diff=lfs merge=lfs -text
+tools/**/*.msi             filter=lfs diff=lfs merge=lfs -text
+
+# Normalise line endings for the PowerShell + HCL we DO commit (LF in repo).
+*.ps1   text eol=lf
+*.psm1  text eol=lf
+*.psd1  text eol=lf
+*.pkr.hcl text eol=lf
+*.tf    text eol=lf
+*.toml  text eol=lf
