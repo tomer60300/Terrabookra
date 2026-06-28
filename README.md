@@ -2,7 +2,15 @@
 
 Automated provisioning of GitLab Runner VMs for an air-gapped Windows Server 2019 environment.
 
-A single orchestrator script (`Bootstrap-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a freshly provisioned VM and dispatches modular phases that produce a fully operational GitLab Runner — registered, polling for jobs, with Docker, maintenance tasks, and monitoring — all with zero manual intervention.
+> **`terraform` branch:** the build moved off Be1 to **Packer + Terraform**. Packer builds one generic,
+> **unregistered** golden image (phases run over SSH with `windows-restart` between them); Terraform
+> deploys runners that **self-register at first boot** from vSphere `guestinfo`. Artifacts travel via
+> **Git LFS**; images come from the **GitLab Container Registry**. MinIO + Be1 are retired. `main`
+> remains the Be1 line (rollback baseline) and matches the older description below.
+> See `docs/MIGRATION-TO-TERRAFORM.md` + `docs/MIGRATION-STATUS.md`.
+
+On `main`, a single orchestrator (`Bootstrap-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a
+freshly provisioned VM and dispatches modular phases that produce a fully operational GitLab Runner.
 
 ---
 
@@ -14,9 +22,9 @@ A single orchestrator script (`Bootstrap-GitLabRunner.ps1`) is executed by VMwar
 | GitLab | 16.7.10-ee (self-managed) |
 | GitLab Runner | 16.7.0 |
 | Docker | 25.0.15 (raw binaries, process isolation) |
-| Container images | Harbor `golden-image` project |
-| Artifact store | MinIO S3 (`gitlab-runner-golden` bucket) |
-| Provisioning | VMware Aria (Be1) |
+| Container images | GitLab Container Registry (`terraform` branch; Harbor on `main`) |
+| Artifact store | Git LFS + uploaded repo (`terraform` branch; MinIO S3 on `main`) |
+| Build / deploy | Packer + Terraform (`terraform` branch; VMware Aria/Be1 on `main`) |
 
 ---
 

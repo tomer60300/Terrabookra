@@ -27,6 +27,15 @@ Estimates are for one engineer, rough.
 **Out of scope:** Vault, least-priv finalization, Terraform fleet, full air-gap hardening.
 **Size:** ~2–4 weeks (access + Packer experience are the swing factors).
 
+> **Status (in progress, `terraform` branch):** the code-side of Epic 2 is implemented additively — Packer
+> `base`+`golden`, the `Invoke-Phase` wrapper, build-time `Phase3-Install`, first-boot registration,
+> validation split, Terraform module, CI rewrite, Git LFS, and the Be1-glue retirement. Decisions made:
+> generic/unregistered image + guestinfo first-boot registration; images via **GitLab Container Registry**
+> (Harbor retired); MinIO retired (binaries via **Git LFS**). Remaining (2.1/2.4/2.5) need a **lab vCenter**:
+> install Packer + offline mirror, prove reboot-resume under `windows-restart`, run the build-gate green.
+> Tasks 2.3 (template + strip 3010/self-reboot) and 2.5's validation-as-build-gate are done in code. See
+> `docs/MIGRATION-STATUS.md`.
+
 | ID | Task | Pri | Est | Done when |
 |----|------|-----|-----|-----------|
 | 2.1 | Get lab vCenter + a service account; install Packer; hand-mirror the vSphere plugin (air-gapped) | P1 | 1–3d | `packer` runs offline with the plugin; can auth to lab vCenter |

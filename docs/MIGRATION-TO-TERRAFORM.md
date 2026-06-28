@@ -1,10 +1,24 @@
 # Migrating off Be1 → Packer + Terraform — Best-Practice Design
 
+> **Implementation status (`terraform` branch):** the code-side of this design is implemented — see
+> `docs/MIGRATION-STATUS.md`. Decisions taken during implementation that supersede parts of the design
+> text below:
+> - **Artifacts: MinIO is RETIRED.** Build binaries travel via **Git LFS** and are read from the repo
+>   tree Packer uploads (`Copy-RepoFile` / `Install-Local*`). (§2/§4 still say "MinIO stays" — overridden.)
+> - **Images: Harbor is RETIRED → GitLab Container Registry.** (§2/§4 still say "Harbor stays" — overridden.)
+> - **Aliases by name resolution, not byte-substitution** (§5.3-adjacent): `Config.ps1` reads `$env:REAL_*`
+>   with the `*.kayhut.com` alias as default; `Substitute-Aliases` is removed; `Validate-NoAliases` is
+>   repurposed to the alias-by-resolution invariant.
+> - **Phase refactor = thin** (§5.1 option A): phases stay intact, de-rebooted/de-chained; Packer owns
+>   `windows-restart`. **Communicator = SSH** baked into the base (§5.2). The thin orchestrator is
+>   `provisioners/Invoke-Phase.ps1`; first-boot registration is `provisioners/Register-RunnerFirstBoot.ps1`.
+
 **Scope:** replace VMware Aria ("Be1") as the orchestrator of the air-gapped
 Windows Server 2019 GitLab-Runner golden image, with a HashiCorp toolchain, done
 to best practice and with a controlled, low-risk migration. Target environment is
-unchanged: air-gapped, WS2019 LTSC, artifacts from MinIO (S3/SigV4), images from
-Harbor, SSH as the in-guest control plane (WinRM is GPO-blocked).
+unchanged: air-gapped, WS2019 LTSC, SSH as the in-guest control plane (WinRM is
+GPO-blocked). (Artifact-plane note: this text's MinIO/Harbor references are
+superseded by the status banner above.)
 
 ---
 

@@ -1,5 +1,12 @@
 # Architecture
 
+> **This document describes the `main` (Be1) architecture.** On the `terraform` branch the build is
+> Packer + Terraform: Packer builds a generic, unregistered image (phases over SSH, `windows-restart`
+> between them; artifacts from Git LFS / the uploaded repo; images from the GitLab Container Registry),
+> and Terraform deploys runners that self-register at first boot from vSphere `guestinfo`. MinIO, the
+> SigV4 self-fetch, the `3010` reboot contract, and Harbor are retired there. See
+> `docs/MIGRATION-TO-TERRAFORM.md` + `docs/MIGRATION-STATUS.md`; the diagrams below are the Be1 model.
+
 ## Overview
 
 Terrabookra provisions GitLab Runner VMs in a fully air-gapped Windows Server 2019 environment. A single bootstrap script is the only file VMware Aria (Be1) fetches from MinIO -- it self-downloads the rest and orchestrates a 4-phase provisioning flow with two reboots.

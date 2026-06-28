@@ -1,7 +1,15 @@
 # CLAUDE.md — Terrabookra
 
 GitLab Runner **golden-image provisioner** for an **air-gapped** Windows Server 2019 LTSC fleet.
-PowerShell 5.1. Built on the production leg by VMware Aria ("Be1") via VMware Tools guest operations, with reboots between phases.
+PowerShell 5.1.
+
+> **`terraform` branch (current): the build moved off Be1 to Packer + Terraform.**
+> Packer builds ONE generic, **unregistered** golden image (phases run over SSH with `windows-restart`
+> between them); Terraform deploys runners that **self-register at first boot** from vSphere `guestinfo`.
+> MinIO is retired (artifacts via **Git LFS** + the uploaded repo tree); images come from the **GitLab
+> Container Registry** (Harbor retired). `main` still holds the Be1 line as the rollback baseline — where
+> this file's older "Be1 / MinIO / Harbor" wording still applies. See `docs/MIGRATION-STATUS.md` and
+> `docs/MIGRATION-TO-TERRAFORM.md`.
 
 ## Two environments — know which leg you're on
 This project lives in **two separate worlds**. Getting this wrong is the #1 source of confusion.
@@ -29,29 +37,46 @@ This project lives in **two separate worlds**. Getting this wrong is the #1 sour
 - **WinRM is GPO-blocked** at Kayhut. SSH (OpenSSH) is the remote control plane (enabled by Phase 1
   step 1.11; fleet management uses SSH too). Do not reintroduce WinRM / `Invoke-Command`.
 
-## How a build runs (production leg)
-- **Be1 (VMware Aria)** creates the VM, domain-joins it + sets DNS, injects `GITLAB_RUNNER_TOKEN`,
-  fetches `Bootstrap-GitLabRunner.ps1` from MinIO, and runs it **via VMware Tools guest operations**
-  (not SSH/WinRM), powering the VM back on after each reboot. SSH is the *post-provision* control
-  plane (fleet/admin access) — a separate thing from how Be1 triggers the build.
-- **Exit-code contract with Be1:** `3010` = reboot/power-back-on, `0` = done, `1` = fail (Be1 stops).
-- **Phases:** 0 = fetch bootstrap files from MinIO · 1 = system prep (→reboot) · 2 = Docker install
-  (→reboot) · 3 = runner setup + final validation. `.phaseN_complete` markers drive resume and are
-  **durable** (existence-only; a crash mid-phase leaves no marker and re-runs naturally).
-- The finished golden image is a **GitLab Runner** that runs CI jobs in **ltsc2019 Windows containers
-  (docker-windows executor, process isolation)**. The deployed fleet is queried from an admin PC over
-  **SSH** (`fleet/Get-FleetHealth`, `Invoke-FleetCommand`), not WinRM.
+## How a build runs (`terraform` branch — Packer/Terraform)
+- **Packer is the orchestrator** (replaces Be1). `packer/base` builds a WS2019 template with OpenSSH
+  baked in (autounattend); `packer/golden` clones it, uploads the repo (`file` provisioner), and runs
+  `provisioners/Invoke-Phase.ps1 -Phase 1|2|3` over the **SSH communicator** with `windows-restart`
+  between phases. **No `3010` self-reboot, no MinIO self-fetch, no marker dispatch** — Packer owns
+  sequencing. Phases still set `.phaseN_complete` markers (existence-only) as idempotency, not the driver.
+- **Phase 3 is build-time only** (`phases/Phase3-Install.ps1`, `Invoke-Phase3Install`): Docker verify,
+  runner **binary** install, image pre-pull (GitLab registry), tools/observability, and a **token-less
+  `config.toml` skeleton**. It does NOT resolve a token, register, or install the runner service — the
+  image ships **generic + unregistered**.
+- **First boot (deployed clone):** `provisioners/Register-RunnerFirstBoot.ps1` (SYSTEM startup task,
+  installed at build) reads `guestinfo.runner_token` + `guestinfo.runner_hostname` via
+  `vmtoolsd --cmd "info-get guestinfo.<k>"`, writes the final `config.toml`, registers if needed, and
+  installs+starts the runner service. Idempotent + retry.
+- **Two gates:** build-gate = `validation/Invoke-FinalValidation` (image-correctness; runs inside Phase 3,
+  fails `packer build`); deploy-gate = `Test-RunnerRegistered` (service running + `gitlab-runner verify`
+  + tasks/sshd/exporters; runs at first boot / CI acceptance).
+- **Artifacts:** no MinIO. Binaries travel via **Git LFS** and are read from the uploaded repo tree
+  (`Copy-RepoFile` / `Install-LocalBinary` / `Install-LocalArchive`). Images come from the **GitLab
+  Container Registry**. The deployed fleet is queried from an admin PC over **SSH**, not WinRM.
 
 ## Repo layout
-- `Bootstrap-GitLabRunner.ps1` — orchestrator, self-contained Phase 0 fetch, phase dispatch. (Cannot
-  depend on `lib/Common.ps1` — it *fetches* it; the SigV4 signing logic is duplicated on purpose.)
-- `lib/Config.ps1` — all settings, creds (placeholders), S3 keys, host aliases. `lib/Common.ps1` —
-  logging, markers, S3 fetch (`Get-S3Object`).
-- `phases/` — `Phase1-SystemPrep`, `Phase2-DockerInstall`, `Phase3-RunnerSetup`.
+- `packer/` — `base/` (vsphere-iso + `autounattend.xml`, OpenSSH/SSH communicator) and `golden/`
+  (vsphere-clone + repo upload + phase provisioners + build-gate). `example.pkrvars.hcl` are committed
+  placeholders; real `*.auto.pkrvars.hcl` are gitignored.
+- `terraform/` — vSphere clone-from-template fleet; `extra_config` guestinfo identity contract;
+  `TODO(#12)` placement + `TODO(#13)` domain join; offline provider mirror (`terraform.rc`).
+- `provisioners/` — `Invoke-Phase.ps1` (thin Packer entry → `Invoke-PhaseN`), `Register-RunnerFirstBoot.ps1`.
+- `transfer/` — `Export-Transfer.ps1` / `Import-Transfer.ps1` (git bundle + LFS CAS over USB).
+- `lib/Config.ps1` — settings; host vars read `$env:REAL_*` with `*.kayhut.com` alias defaults; artifact
+  catalogs (`S3Keys`/`S3KeysExtra`/… are now **repo-relative paths**, not MinIO keys). `lib/Common.ps1`
+  — logging, markers, local artifact helpers (`Get-RepoPath`/`Copy-RepoFile`/`Install-Local*`).
+- `phases/` — `Phase1-SystemPrep`, `Phase2-DockerInstall`, `Phase3-Install` (build-time).
 - `scripts/` — install + maintenance (`Install-Tools/OpenCode/Observability`, `Assert-Environment`,
   `Import-Certificates`, `Enable-RemoteSSH`, watchdogs, disk-monitor, health-check).
-- `validation/` — `Test-Dependencies` (preflight), `Invoke-FinalValidation` (Phase 3 gate).
-- `ci/` — `Sync-ToMinio`, `Validate-NoAliases`, `Substitute-Aliases`, `FileMap`.
+- `validation/` — `Test-BuildInputs` (preflight: LFS artifacts + registry), `Invoke-FinalValidation`
+  (build-gate) + `Test-RunnerRegistered` (deploy-gate).
+- `ci/` — `Validate-NoAliases` (alias-by-resolution invariant), `Invoke-AcceptanceGate`,
+  `Publish-GoldenManifest`.
+- `Bootstrap-GitLabRunner.ps1` — **retired stub** (Be1 entry point; deleted-soon).
 - `fleet/` — SSH-based fleet health/command tools (run from an admin PC, not on runners).
 - `docs/` — design + review notes (read for depth).
 
@@ -59,7 +84,9 @@ This project lives in **two separate worlds**. Getting this wrong is the #1 sour
 - Commit author is **Tomer60300 <Tomer60300@gmail.com>**, with **no** Claude / Co-Authored-By /
   "Generated with" trailer:
   `git -c user.name='Tomer60300' -c user.email='Tomer60300@gmail.com' commit -F msg.txt`
-- Flow: commit on `hardening/2.4.6-cluster-and-review`, push, then fast-forward `main`.
+- Flow (terraform branch): commit per task on `terraform`, push `terraform`; **never touch `main`**
+  (it's the Be1 rollback baseline). Do **not** fast-forward `main` (the `ship` skill's main-FF step is
+  dropped here).
 - Pushing: the token var must be **exported** or the credential helper sends an *empty* password.
   The repo is **public**, so reads/`ls-remote` succeed even with a bad token — that masks an auth
   failure on push. Don't conclude "token revoked" from a failed push alone.
@@ -82,9 +109,9 @@ Enabled in `.claude/settings.json`; the repo also ships its own `ps-reviewer` ag
 - **Superpowers** — keep its planning, **two-stage review**, and **root-cause debugging**
   as-is. But there is **no unit-test suite here**: wherever a skill's plan→test→code loop
   expects a failing test, read "the test" as **`verify-ps` passing + the relevant validation**
-  (`validation/Invoke-FinalValidation` as the build gate; `Test-Dependencies` preflight;
-  `Assert-Environment`). Verification is static — don't fabricate a unit-test harness to
-  satisfy a skill.
+  (`validation/Invoke-FinalValidation` as the build-gate; `Test-RunnerRegistered` deploy-gate;
+  `Test-BuildInputs` preflight; `Assert-Environment`). Verification is static — don't fabricate a
+  unit-test harness to satisfy a skill.
 - **HashiCorp Packer + Terraform skills** — for the Be1→Packer/Terraform work only
   (`docs/MIGRATION-TO-TERRAFORM.md`; `docs/BACKLOG.md` Epics 2–3). Use the **Windows-image**
   Packer skill and honor the constraints: air-gapped, WS2019/ltsc2019, **SSH communicator**
@@ -101,14 +128,20 @@ Enabled in `.claude/settings.json`; the repo also ships its own `ps-reviewer` ag
   usable. Use `Add-Type` then `'Type' -as [type]`.
 - **`$LASTEXITCODE` is stale** after cmdlets/pipelines — reset it first, or run child scripts as a
   subprocess (`powershell.exe -File ...`) and read its exit.
-- **skip-if-exists caches** can shadow an updated artifact in MinIO — re-fetch bootstrap-controlled files.
+- **skip-if-exists caches** can shadow an updated artifact — `Copy-RepoFile` always re-copies; don't add
+  skip-if-exists to rotation-prone artifacts (CA certs / first-boot inputs).
 - **`Write-EventLog` needs the `GitLabRunner` event source**, created by `Assert-Environment` in
   Phase 1. Guard with `[System.Diagnostics.EventLog]::SourceExists(...)` for off-host/CI runs.
 
 ## Current state & where to look
-- `main` is the live branch (check `git log`). Recent work: fatal Phase 1 SSH/cert gates, durable
-  markers, GitLab Container Registry `docker login` (Phase 3.5, non-fatal + verbose), CI/event-log fixes.
-- Known issue: golden-image **version stamp is hard-coded `2.4.0`** — see `docs/BACKLOG.md` (Epic 1).
+- **`terraform` is the working branch** (Epic 2: Be1 → Packer/Terraform, implemented — see
+  `docs/MIGRATION-STATUS.md`). `main` is the untouched Be1 rollback baseline.
+- Next manual step: smoke-test `packer build` + the Terraform deploy on a **lab vCenter** (reboot-resume
+  under `windows-restart`, acceptance-gate pipelines) — not runnable on the dev/internet leg.
+- Open: `TODO(#12)` vCenter placement + `TODO(#13)` domain-join facts block `terraform apply` only.
+  Acceptance-gate pipeline triggers (`ci/Invoke-AcceptanceGate.ps1`) are a lab step.
+- Known issue: golden-image **version stamp is hard-coded `2.4.0`** in Config; CI `promote` now derives
+  `2.x.y+<gitsha>` from the build manifest (`ci/Publish-GoldenManifest.ps1`) — see `docs/BACKLOG.md` (Epic 1).
 - Depth: `docs/ARCHITECTURE.md`, `docs/DEPENDENCIES.md`, `docs/review/REVIEW.md`/`ENV-REVIEW.md`/`BUGMAP.md`;
   `docs/MIGRATION-TO-TERRAFORM.md` (Be1→Packer/Terraform plan); `docs/BACKLOG.md` (open epics/tasks).
 - **Stale doc warning:** the workspace `HANDOVER.md` (2026-05-05) describes an older **WinRM** design,
