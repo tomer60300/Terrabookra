@@ -1,0 +1,17 @@
+# Air-gap provider mirror. Point CLI config at this file:
+#   setx TF_CLI_CONFIG_FILE "%CD%\terraform.rc"   (Windows)
+#   export TF_CLI_CONFIG_FILE="$PWD/terraform.rc"  (Linux)
+#
+# Populate the mirror on an internet-connected host, then carry it over (USB):
+#   terraform providers mirror /path/to/terraform-plugins
+#
+# Adjust the path to wherever the mirror lands on the internal leg.
+provider_installation {
+  filesystem_mirror {
+    path    = "/opt/terraform-plugins"
+    include = ["hashicorp/vsphere"]
+  }
+  direct {
+    exclude = ["hashicorp/vsphere"]
+  }
+}
