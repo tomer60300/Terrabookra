@@ -49,29 +49,21 @@ function Invoke-Phase1 {
     $preResult | ForEach-Object { Write-Log "  preflight: $_" }
     if ($preExit -ne 0) { Write-LogError 'FATAL: environment preflight failed -- aborting'; exit 1 }
 
-    # -- 1.0 Pre-flight dependency validation -----------------
-    Write-Log '1.0 Pre-flight dependency validation (DNS + S3 + Harbor)'
-    $depScript = Join-Path $PSScriptRoot '..\validation\Test-Dependencies.ps1'
+    # -- 1.0 Pre-flight build-input validation ----------------
+    # Packer model: artifacts come from the uploaded repo tree (Git LFS), images
+    # from the GitLab Container Registry. Validate those, not MinIO/Harbor.
+    Write-Log '1.0 Pre-flight build-input validation (repo artifacts + GitLab registry)'
+    $depScript = Join-Path $PSScriptRoot '..\validation\Test-BuildInputs.ps1'
     if (-not (Test-Path $depScript)) {
-        $depScript = Join-Path $Script:Config.ScriptsDir 'Test-Dependencies.ps1'
-        if (-not (Test-Path $depScript)) {
-            if (-not (Get-S3Object -Key $Script:Config.S3KeysExtra.DepValidator -OutFile $depScript)) {
-                Write-LogError 'FATAL: could not fetch Test-Dependencies.ps1 -- pre-flight validation is mandatory'
-                exit 1
-            }
-        }
-    }
-    if (-not (Test-Path $depScript)) {
-        Write-LogError 'FATAL: Test-Dependencies.ps1 not available -- cannot validate dependencies'
+        Write-LogError "FATAL: Test-BuildInputs.ps1 not found at $depScript -- pre-flight is mandatory"
         exit 1
     }
-    # Run in subprocess -- Test-Dependencies.ps1 uses exit which would kill us
+    # Subprocess -- the script uses `exit`, which would otherwise kill this phase.
     $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript 2>&1
     $depExit   = $LASTEXITCODE
-    $depResult | ForEach-Object { Write-Log "  dep: $_" }
+    $depResult | ForEach-Object { Write-Log "  preflight: $_" }
     if ($depExit -ne 0) {
-        Write-LogError "FATAL: Dependency validation failed ($depExit). Cannot provision without all dependencies."
-        Write-LogError '  Fix: ensure DNS, MinIO objects, and Harbor images are all reachable, then re-run.'
+        Write-LogError "FATAL: build-input validation failed ($depExit) -- missing repo artifacts or GitLab registry unreachable."
         exit 1
     }
 
