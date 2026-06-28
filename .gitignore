@@ -18,6 +18,9 @@ secrets.json
 *.tmp
 ~$*
 
+# Agent / workflow logs
+agent-logs/
+
 # OS
 Thumbs.db
 desktop.ini
