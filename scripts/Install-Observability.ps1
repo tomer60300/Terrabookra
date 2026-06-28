@@ -68,7 +68,7 @@ if (-not $Script:Config) {
     }
     if ($ConfigPath -and (Test-Path $ConfigPath)) { . $ConfigPath }
 }
-if (-not (Get-Command Get-S3Object -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command Copy-RepoFile -ErrorAction SilentlyContinue)) {
     if ($ConfigPath) {
         $commonPath = Join-Path (Split-Path $ConfigPath) 'Common.ps1'
         if (Test-Path $commonPath) { . $commonPath }
@@ -101,22 +101,24 @@ function Test-MagicBytes {
 }
 
 function Stage-IfMissing {
+    # $S3Key is a repo-relative path (the param name is kept for compatibility).
+    # Phase3-Install normally stages these first; this is the self-staging fallback.
     param([string]$LocalPath, [string]$S3Key, [string]$Kind, [string]$Label)
     if (Test-MagicBytes -Path $LocalPath -Kind $Kind) { return $true }
     if (Test-Path $LocalPath) { Remove-Item $LocalPath -Force -ErrorAction SilentlyContinue }
-    if (-not (Get-Command Get-S3Object -ErrorAction SilentlyContinue)) {
-        Write-Step "  ERROR: $Label not staged and Get-S3Object unavailable -- cannot self-stage" 'ERROR'
+    if (-not (Get-Command Copy-RepoFile -ErrorAction SilentlyContinue)) {
+        Write-Step "  ERROR: $Label not staged and Copy-RepoFile unavailable -- cannot self-stage" 'ERROR'
         return $false
     }
     $dir = Split-Path $LocalPath -Parent
     if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
-    Write-Step "  $Label not staged -- self-staging s3://$S3Key"
-    if (-not (Get-S3Object -Key $S3Key -OutFile $LocalPath)) {
-        Write-Step "  ERROR: download failed for $Label ($S3Key) -- key likely missing in MinIO" 'ERROR'
+    Write-Step "  $Label not staged -- self-staging from repo:$S3Key"
+    if (-not (Copy-RepoFile -RelPath $S3Key -OutFile $LocalPath)) {
+        Write-Step "  ERROR: copy failed for $Label ($S3Key) -- path likely missing in the uploaded repo" 'ERROR'
         return $false
     }
     if (-not (Test-MagicBytes -Path $LocalPath -Kind $Kind)) {
-        Write-Step "  ERROR: $Label downloaded but failed $Kind validation" 'ERROR'
+        Write-Step "  ERROR: $Label staged but failed $Kind validation" 'ERROR'
         return $false
     }
     return $true

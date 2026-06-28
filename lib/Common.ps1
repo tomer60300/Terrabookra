@@ -162,8 +162,89 @@ function Get-S3Object {
 }
 
 # ============================================================
+# LOCAL ARTIFACT SOURCE (Packer model -- repo is uploaded into the guest)
+# ============================================================
+# In the Packer/Terraform model there is no MinIO fetch at build time: Packer's
+# `file` provisioner uploads the whole repo into the guest, so artifacts are read
+# from the uploaded tree. $Script:RepoRoot is the parent of this lib/ directory,
+# so it resolves wherever Packer placed the repo. The artifact catalogs in
+# Config.ps1 (S3Keys / S3KeysExtra / ToolPackages[].S3Key / ObservabilityPackages)
+# carry repo-relative paths (e.g. 'binaries/git/MinGit-2.43.0-64-bit.zip'); these
+# helpers consume those same paths locally. (Get-S3Object below is retained for
+# the legacy Be1 path until it is retired.)
+
+# $PSScriptRoot = this lib/ dir when dot-sourced from a path; parent = repo root.
+# Fall back to $PSCommandPath, then the legacy bootstrap dir, if it is empty
+# (e.g. loaded via Invoke-Expression on content rather than from a file path).
+$Script:RepoRoot =
+    if     ($PSScriptRoot)   { Split-Path $PSScriptRoot -Parent }
+    elseif ($PSCommandPath)  { Split-Path (Split-Path $PSCommandPath -Parent) -Parent }
+    else                     { 'C:\GitLab-Runner' }
+
+function Get-RepoPath {
+    <#
+    .SYNOPSIS  Resolve a repo-relative artifact path against the uploaded repo root.
+    #>
+    param([Parameter(Mandatory)][string]$RelPath)
+    return (Join-Path $Script:RepoRoot ($RelPath -replace '/', '\'))
+}
+
+function Copy-RepoFile {
+    <#
+    .SYNOPSIS  Copy an artifact from the uploaded repo tree to a destination.
+    .OUTPUTS   [bool] $true on success. Signature mirrors Get-S3Object
+               (Key/OutFile -> RelPath/OutFile) so call sites swap cleanly.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RelPath,
+        [Parameter(Mandatory)][string]$OutFile
+    )
+    $src = Get-RepoPath $RelPath
+    if (-not (Test-Path $src)) { Write-LogError "Artifact not found in repo: $src"; return $false }
+    $outDir = Split-Path $OutFile -Parent
+    if ($outDir -and -not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
+    Copy-Item -Path $src -Destination $OutFile -Force
+    if (Test-Path $OutFile) {
+        Write-Log "Copied $RelPath -> $OutFile ($((Get-Item $OutFile).Length) bytes)"
+        return $true
+    }
+    Write-LogError "Copy produced no file: $OutFile"
+    return $false
+}
+
+# ============================================================
 # BINARY HELPERS
 # ============================================================
+
+function Install-LocalBinary {
+    <#
+    .SYNOPSIS  Copy an EXE from the uploaded repo and validate its PE header.
+               Local-source twin of Install-S3Binary.
+    .NOTES     Skip-if-exists: safe because the source (Packer-uploaded repo) is
+               immutable per build. Do NOT reuse for rotation-prone artifacts
+               (CA certs / bootstrap files) -- use Copy-RepoFile (always re-copies).
+    #>
+    param([string]$RelPath, [string]$DestPath, [string]$Label)
+    if (Test-PEBinary $DestPath) { Write-Log "$Label already present"; return $true }
+    if ((Copy-RepoFile -RelPath $RelPath -OutFile $DestPath) -and (Test-PEBinary $DestPath)) {
+        Write-Log "$Label copied and validated"; return $true
+    }
+    Write-LogError "FATAL: $Label -- copy or PE validation failed"
+    return $false
+}
+
+function Install-LocalArchive {
+    <#
+    .SYNOPSIS  Extract a ZIP from the uploaded repo. Local-source twin of Install-S3Archive.
+    #>
+    param([string]$RelPath, [string]$DestDir, [string]$TestFile, [string]$Label)
+    if ($TestFile -and (Test-Path $TestFile)) { Write-Log "$Label already present"; return $true }
+    $src = Get-RepoPath $RelPath
+    if (-not (Test-Path $src)) { Write-LogError "FATAL: $Label -- archive not found: $src"; return $false }
+    Expand-Archive -Path $src -DestinationPath $DestDir -Force
+    Write-Log "$Label extracted to $DestDir"
+    return $true
+}
 
 function Test-PEBinary {
     <#

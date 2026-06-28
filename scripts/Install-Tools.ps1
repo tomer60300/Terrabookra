@@ -61,8 +61,10 @@ if (-not $Script:Config) {
     . $ConfigPath
 }
 
-# Get-S3Object lives in lib/Common.ps1; ensure it's loaded
-if (-not (Get-Command Get-S3Object -ErrorAction SilentlyContinue)) {
+# Copy-RepoFile lives in lib/Common.ps1; ensure it's loaded. Artifacts are read
+# from the uploaded repo tree (Packer model), not MinIO -- each tool's S3Key is a
+# repo-relative path (e.g. 'tools/winrar/winrar-x64-701.exe').
+if (-not (Get-Command Copy-RepoFile -ErrorAction SilentlyContinue)) {
     $commonPath = Join-Path (Split-Path $ConfigPath) 'Common.ps1'
     if (Test-Path $commonPath) { . $commonPath }
 }
@@ -207,8 +209,8 @@ function Install-MsixBundle {
         foreach ($depKey in $Tool.Dependencies) {
             $depPath = Join-Path $Tool.StageDir (Split-Path $depKey -Leaf)
             if (-not (Test-StagedFile -Path $depPath -Kind 'zip')) {
-                if (-not (Get-S3Object -Key $depKey -OutFile $depPath)) {
-                    Write-Step "  ERROR: dependency download failed: $depKey -- skipping" 'ERROR'; continue
+                if (-not (Copy-RepoFile -RelPath $depKey -OutFile $depPath)) {
+                    Write-Step "  ERROR: dependency copy failed: $depKey -- skipping" 'ERROR'; continue
                 }
             }
             # Revalidate after download -- never hand a missing/garbage dependency to Add-AppxProvisionedPackage
@@ -274,9 +276,9 @@ foreach ($tool in $Script:Config.ToolPackages) {
             Write-Step "  Cached file invalid -- deleting and re-fetching" 'WARN'
             Remove-Item $local -Force -ErrorAction SilentlyContinue
         }
-        Write-Step "  Fetching s3://$($tool.S3Key) -> $local"
-        if (-not (Get-S3Object -Key $tool.S3Key -OutFile $local)) {
-            Write-Step "  ERROR: download failed (Get-S3Object returned false) -- key likely missing in MinIO" 'ERROR'
+        Write-Step "  Staging repo:$($tool.S3Key) -> $local"
+        if (-not (Copy-RepoFile -RelPath $tool.S3Key -OutFile $local)) {
+            Write-Step "  ERROR: copy failed (Copy-RepoFile returned false) -- path likely missing in the uploaded repo" 'ERROR'
             $failed++
             continue
         }
