@@ -49,13 +49,6 @@ $_be1Host          = if ($env:REAL_BE1_HOST)        { $env:REAL_BE1_HOST }      
 
 $Script:Config = @{
 
-    # --- MinIO S3 ---
-    MinioEndpoint    = "https://${_minioHost}:${_minioPort}"
-    MinioBucket      = 'gitlab-runner-golden'
-    MinioAccessKey   = 'YOUR_ACCESS_KEY_HERE'
-    MinioSecretKey   = 'YOUR_SECRET_KEY_HERE'
-    MinioRegion      = 'us-east-1'
-
     # --- GitLab ---
     # GITLAB_RUNNER_TOKEN must be set as env var or Machine-level variable
     # before running. Two formats supported:
@@ -171,12 +164,11 @@ $Script:Config = @{
         CacheType              = ''
     }
 
-    # --- MinIO object keys ---
-    # --- MinIO object keys -- core binaries + maintenance scripts ---
-    # Tools (WinRAR, NSSM, Sysinternals, Notepad++, etc.) and observability
-    # exporters live in their own tables (ToolPackages, ObservabilityPackages
-    # at the bottom of this file). This table only holds the runtime essentials
-    # downloaded by Phase 2 (Docker/runner binaries) and Phase 3 (maintenance scripts).
+    # --- Core artifact paths (repo-relative) -- binaries + maintenance scripts ---
+    # Consumed locally from the uploaded repo tree (Copy-RepoFile / Install-Local*).
+    # Tools and observability exporters live in their own tables (ToolPackages,
+    # ObservabilityPackages). Binaries (*.exe/*.zip under binaries/) are Git LFS.
+    # 'S3Keys' is a historical name -- these are no longer MinIO object keys.
     S3Keys = @{
         RunnerBin    = 'binaries/gitlab-runner-16.7.0-windows-amd64.exe'
         DockerExe    = 'binaries/docker/docker.exe'
@@ -204,25 +196,15 @@ $Script:Config = @{
     RdpLogDir        = 'C:\GitLab-Runner\logs\rdp'
     RdpLogMaxDays    = 30
 
-    # --- Certificate S3 keys ---
+    # --- Certificate paths (repo-relative; staged by Import-Certificates) ---
     S3Certs = @(
         'certs/kayhut-ca.crt'
     )
 
-    # --- Bootstrap S3 keys (downloaded by Phase 0 in Bootstrap-GitLabRunner.ps1) ---
-    S3Bootstrap = @{
-        Config         = 'bootstrap/lib/Config.ps1'
-        Common         = 'bootstrap/lib/Common.ps1'
-        Phase1         = 'bootstrap/phases/Phase1-SystemPrep.ps1'
-        Phase2         = 'bootstrap/phases/Phase2-DockerInstall.ps1'
-        Phase3         = 'bootstrap/phases/Phase3-RunnerSetup.ps1'
-        FinalValid     = 'bootstrap/validation/Invoke-FinalValidation.ps1'
-    }
-
-    # --- MinIO object keys -- auxiliary scripts and one-shot binaries ---
-    # Test-Dependencies.ps1 enumerates this hashtable verbatim, so adding a
-    # key here automatically gets it pre-flight checked. Remove a key only
-    # when the corresponding object has been deleted from MinIO.
+    # --- Auxiliary scripts + one-shot binaries (repo-relative paths) ---
+    # Test-BuildInputs.ps1 enumerates this hashtable, so adding a key here gets it
+    # build-input checked. The 'S3' names are historical: these are now repo paths
+    # consumed locally (Copy-RepoFile), not MinIO keys.
     S3KeysExtra = @{
         # --- Scripts -----------------------------------------------------------
         ImportCerts          = 'scripts/Import-Certificates.ps1'
@@ -237,7 +219,7 @@ $Script:Config = @{
         InstallObservability = 'scripts/Install-Observability.ps1'
         SetWtDefault         = 'scripts/Set-WindowsTerminalDefault.ps1'
         FirstBootRegister    = 'provisioners/Register-RunnerFirstBoot.ps1'
-        DepValidator         = 'validation/Test-Dependencies.ps1'
+        DepValidator         = 'validation/Test-BuildInputs.ps1'
         AssertEnv            = 'scripts/Assert-Environment.ps1'
         ThemeScript          = 'scripts/Set-RunnerTheme.ps1'
 

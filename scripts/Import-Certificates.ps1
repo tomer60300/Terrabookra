@@ -43,10 +43,10 @@ if (-not (Test-Path $CertsDir)) {
     New-Item -Path $CertsDir -ItemType Directory -Force | Out-Null
 }
 
-# -- Step 1: Fetch certificates from MinIO S3 ----------------
+# -- Step 1: Stage certificates from the uploaded repo -------
 $s3Certs = $Script:Config.S3Certs
 if ($s3Certs -and $s3Certs.Count -gt 0) {
-    Write-Output "Fetching $($s3Certs.Count) certificate(s) from S3..."
+    Write-Output "Staging $($s3Certs.Count) certificate(s) from repo..."
     foreach ($certKey in $s3Certs) {
         $fileName = Split-Path $certKey -Leaf
         $destPath = Join-Path $CertsDir $fileName
@@ -59,11 +59,11 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
             Write-Output "  [SKIP DL] $fileName -- already in $CertsDir ($((Get-Item $destPath).Length) bytes)"
             continue
         }
-        $ok = Get-S3Object -Key $certKey -OutFile $destPath
+        $ok = Copy-RepoFile -RelPath $certKey -OutFile $destPath
         if ($ok) {
             Write-Output "  [DL] $certKey -> $destPath"
         } else {
-            Write-Output "  [FAIL] Could not download $certKey from S3"
+            Write-Output "  [FAIL] Could not stage $certKey from repo"
             $dlFailures++
             Write-EventLog -LogName Application -Source $source -EventId 9022 -EntryType Warning `
                 -Message "Certificate S3 download failed: $certKey"

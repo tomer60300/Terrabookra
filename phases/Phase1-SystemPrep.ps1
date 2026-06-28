@@ -39,8 +39,8 @@ function Invoke-Phase1 {
     if (-not (Test-Path $preScript)) {
         $preScript = Join-Path $Script:Config.ScriptsDir 'Assert-Environment.ps1'
         if (-not (Test-Path $preScript)) {
-            if (-not (Get-S3Object -Key $Script:Config.S3KeysExtra.AssertEnv -OutFile $preScript)) {
-                Write-LogError 'FATAL: could not fetch Assert-Environment.ps1 -- preflight is mandatory'; exit 1
+            if (-not (Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.AssertEnv -OutFile $preScript)) {
+                Write-LogError 'FATAL: could not stage Assert-Environment.ps1 from repo -- preflight is mandatory'; exit 1
             }
         }
     }
@@ -184,14 +184,14 @@ function Invoke-Phase1 {
 
     # -- 1.10 Import self-signed certificates -----------------
     Write-Log '1.10 Import self-signed certificates'
-    # Download script from S3 first (Phase 3 not yet run on fresh VM)
+    # Stage the script from the uploaded repo (Phase 3 not yet run on fresh VM).
     $importScript = Join-Path $Script:Config.ScriptsDir 'Import-Certificates.ps1'
     if (-not (Test-Path $importScript)) {
-        Write-Log '  Fetching Import-Certificates.ps1 from S3...'
-        Get-S3Object -Key $Script:Config.S3KeysExtra.ImportCerts -OutFile $importScript | Out-Null
+        Write-Log '  Staging Import-Certificates.ps1 from repo...'
+        Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.ImportCerts -OutFile $importScript | Out-Null
     }
     if (-not (Test-Path $importScript)) {
-        Write-LogError 'FATAL: Import-Certificates.ps1 could not be fetched from S3. Cert trust is required -- aborting before the Phase 1 marker.'
+        Write-LogError 'FATAL: Import-Certificates.ps1 could not be staged from repo. Cert trust is required -- aborting before the Phase 1 marker.'
         exit 1
     }
     $global:LASTEXITCODE = 0
@@ -215,31 +215,31 @@ function Invoke-Phase1 {
     # file isn't staged in MinIO).
     Write-Log '1.11 Enable OpenSSH server (remote control plane)'
 
-    # Stage zip + authorized_keys from MinIO into C:\Tools\openssh\
+    # Stage zip + authorized_keys from the uploaded repo into C:\Tools\openssh\
     if (-not (Test-Path $Script:Config.OpenSshStageDir)) {
         New-Item -Path $Script:Config.OpenSshStageDir -ItemType Directory -Force | Out-Null
     }
     if (-not (Test-Path $Script:Config.OpenSshZipLocal)) {
-        Write-Log '  Fetching OpenSSH-Win64.zip from S3...'
-        Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshZip -OutFile $Script:Config.OpenSshZipLocal | Out-Null
+        Write-Log '  Staging OpenSSH-Win64.zip from repo...'
+        Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.OpenSshZip -OutFile $Script:Config.OpenSshZipLocal | Out-Null
     }
     if (-not (Test-Path $Script:Config.OpenSshZipLocal)) {
-        Write-LogError 'FATAL: OpenSSH-Win64.zip could not be fetched from S3. SSH is the remote control plane (WinRM is GPO-blocked) -- aborting before the Phase 1 marker.'
+        Write-LogError 'FATAL: OpenSSH-Win64.zip could not be staged from repo. SSH is the remote control plane (WinRM is GPO-blocked) -- aborting before the Phase 1 marker.'
         exit 1
     }
     if (-not (Test-Path $Script:Config.OpenSshAuthKeysSource)) {
-        Write-Log '  Fetching administrators_authorized_keys from S3 (optional)...'
-        Get-S3Object -Key $Script:Config.S3KeysExtra.OpenSshAuthKeys -OutFile $Script:Config.OpenSshAuthKeysSource | Out-Null
+        Write-Log '  Staging administrators_authorized_keys from repo (optional)...'
+        Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.OpenSshAuthKeys -OutFile $Script:Config.OpenSshAuthKeysSource | Out-Null
     }
 
     # Stage the SSH-enable script
     $sshScript = Join-Path $Script:Config.ScriptsDir 'Enable-RemoteSSH.ps1'
     if (-not (Test-Path $sshScript)) {
-        Write-Log '  Fetching Enable-RemoteSSH.ps1 from S3...'
-        Get-S3Object -Key $Script:Config.S3KeysExtra.EnableRemoteSSH -OutFile $sshScript | Out-Null
+        Write-Log '  Staging Enable-RemoteSSH.ps1 from repo...'
+        Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.EnableRemoteSSH -OutFile $sshScript | Out-Null
     }
     if (-not (Test-Path $sshScript)) {
-        Write-LogError 'FATAL: Enable-RemoteSSH.ps1 could not be fetched from S3. SSH is the remote control plane -- aborting before the Phase 1 marker.'
+        Write-LogError 'FATAL: Enable-RemoteSSH.ps1 could not be staged from repo. SSH is the remote control plane -- aborting before the Phase 1 marker.'
         exit 1
     }
     $global:LASTEXITCODE = 0

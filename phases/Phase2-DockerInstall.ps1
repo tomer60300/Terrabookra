@@ -85,16 +85,16 @@ $registries
         Write-LogWarn "Could not verify drive ${drLetter}: -- ensure it is NTFS"
     }
 
-    # -- 2.2 Download Docker binaries -------------------------
-    Write-Log '2.2 Download Docker binaries'
+    # -- 2.2 Install Docker binaries (from the uploaded repo) -
+    Write-Log '2.2 Install Docker binaries'
     $dockerExe  = Join-Path $Script:Config.DockerDir 'docker.exe'
     $dockerdExe = Join-Path $Script:Config.DockerDir 'dockerd.exe'
 
-    if (-not (Install-S3Binary -S3Key $Script:Config.S3Keys.DockerExe  -DestPath $dockerExe  -Label 'docker.exe'))  {
-        Write-LogError 'FATAL: docker.exe download failed'; exit 1
+    if (-not (Install-LocalBinary -RelPath $Script:Config.S3Keys.DockerExe  -DestPath $dockerExe  -Label 'docker.exe'))  {
+        Write-LogError 'FATAL: docker.exe install failed'; exit 1
     }
-    if (-not (Install-S3Binary -S3Key $Script:Config.S3Keys.DockerdExe -DestPath $dockerdExe -Label 'dockerd.exe')) {
-        Write-LogError 'FATAL: dockerd.exe download failed'; exit 1
+    if (-not (Install-LocalBinary -RelPath $Script:Config.S3Keys.DockerdExe -DestPath $dockerdExe -Label 'dockerd.exe')) {
+        Write-LogError 'FATAL: dockerd.exe install failed'; exit 1
     }
 
     # -- 2.3 Register dockerd as Windows service --------------

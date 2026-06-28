@@ -122,38 +122,37 @@ if (-not $Script:Config) {
 if ($Script:Config) { Write-Check PASS "Config loaded (version $($Script:Config.GoldenImageVersion))" }
 else                { Write-Check FAIL 'Config.ps1 not found / $Script:Config empty -- cannot validate settings' }
 
-# --- Config: credentials not placeholders ------------------------------------
+# --- Config: GitLab + container registry settings ----------------------------
+# MinIO is retired; images come from the GitLab Container Registry.
 if ($Script:Config) {
-    $ak = [string]$Script:Config.MinioAccessKey
-    $sk = [string]$Script:Config.MinioSecretKey
-    $placeholder = { param($v) [string]::IsNullOrWhiteSpace($v) -or $v -like 'YOUR_*' -or $v -like '*_HERE' }
-    if ((& $placeholder $ak) -or (& $placeholder $sk)) {
-        Write-Check FAIL "MinIO credentials are unset/placeholder -- substitute MinioAccessKey/MinioSecretKey in Config.ps1 before deploy"
-    } else {
-        Write-Check PASS 'MinIO credentials are set (not placeholder)'
-    }
-
-    # endpoint parseable
-    $ep = [string]$Script:Config.MinioEndpoint
-    $parsed = $null
-    if (-not [string]::IsNullOrWhiteSpace($ep) -and [Uri]::TryCreate($ep, [UriKind]::Absolute, [ref]$parsed)) {
-        Write-Check PASS "MinIO endpoint parseable ($ep)"
-    } else {
-        Write-Check FAIL "MinIO endpoint missing/invalid: '$ep'"
-        $parsed = $null
-    }
-
-    foreach ($f in @('MinioBucket','GitLabUrl')) {
+    foreach ($f in @('GitLabUrl','GitLabRegistry','RegistryProject')) {
         if ([string]::IsNullOrWhiteSpace([string]$Script:Config.$f)) { Write-Check FAIL "Config.$f is empty" }
         else { Write-Check PASS "Config.$f set ($($Script:Config.$f))" }
     }
+
+    # GitLab URL parseable
+    $gl = [string]$Script:Config.GitLabUrl
+    $parsed = $null
+    if (-not [string]::IsNullOrWhiteSpace($gl) -and [Uri]::TryCreate($gl, [UriKind]::Absolute, [ref]$parsed)) {
+        Write-Check PASS "GitLab URL parseable ($gl)"
+    } else {
+        Write-Check FAIL "GitLab URL missing/invalid: '$gl'"
+    }
+
+    # Registry creds are env-injected at build time (REAL_GITLAB_REGISTRY_USER/PASS)
+    # and MAY be empty (anonymous pull). Warn, do not fail.
+    if ([string]::IsNullOrWhiteSpace([string]$Script:Config.GitLabRegistryUser) -or
+        [string]::IsNullOrWhiteSpace([string]$Script:Config.GitLabRegistryPass)) {
+        Write-Check WARN 'GitLab registry creds unset (REAL_GITLAB_REGISTRY_USER/PASS) -- anonymous pull assumed; private images will fail.'
+    } else {
+        Write-Check PASS 'GitLab registry credentials present (env-injected)'
+    }
 }
 
-# --- Runner token (required by Phase 3; warn here so it's known early) --------
-$token = $env:GITLAB_RUNNER_TOKEN
-if (-not $token) { $token = [Environment]::GetEnvironmentVariable('GITLAB_RUNNER_TOKEN','Machine') }
-if ($token) { Write-Check PASS 'GITLAB_RUNNER_TOKEN present' }
-else        { Write-Check WARN 'GITLAB_RUNNER_TOKEN not set yet -- Phase 3 will FATAL without it' }
+# --- Runner token: first-boot concern, NOT a build requirement ----------------
+# The image ships UNREGISTERED; the token arrives per-clone via vSphere guestinfo
+# at first boot (Register-RunnerFirstBoot.ps1), so it is not needed during build.
+Write-Check PASS 'Runner token not required at build time (delivered via guestinfo at first boot)'
 
 # --- Data drive: must be a FIXED NTFS volume ---------------------------------
 $dataDrive = if ($Script:Config -and $Script:Config.ContainsKey('BuildsDir') -and $Script:Config.BuildsDir) {

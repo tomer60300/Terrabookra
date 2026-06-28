@@ -1,22 +1,22 @@
 ﻿<#
 .SYNOPSIS
-    Common helpers -- TLS bypass, logging, S3 download, PE validation, phase markers, reboot.
+    Common helpers -- TLS bypass, logging, local artifact source, PE validation,
+    phase markers.
 
 .DESCRIPTION
-    Dot-sourced by Bootstrap-GitLabRunner.ps1 after Config.ps1.
-    Provides all shared functions used across phases.
+    Dot-sourced after Config.ps1 (by provisioners/Invoke-Phase.ps1 in the Packer
+    model). Provides the shared functions used across phases.
 
 .NOTES
     File: lib/Common.ps1
-    Used by: Bootstrap-GitLabRunner.ps1, phases/*.ps1, validation/*.ps1
+    Used by: provisioners/Invoke-Phase.ps1, phases/*.ps1, validation/*.ps1
 
     Functions exported:
       Write-Log, Write-LogError, Write-LogWarn
-      Get-S3Object
-      Test-PEBinary, Install-S3Binary, Install-S3Archive
+      Get-RepoPath, Copy-RepoFile, Install-LocalBinary, Install-LocalArchive
+      Test-PEBinary
       Wait-ServiceRunning
       Get-DnsServer
-      Invoke-Be1Reboot
       Set-PhaseMarker, Test-PhaseComplete
 #>
 
@@ -65,113 +65,15 @@ function Write-LogError { param([string]$Message) Write-Log -Message $Message -L
 function Write-LogWarn  { param([string]$Message) Write-Log -Message $Message -Level 'WARN'  }
 
 # ============================================================
-# S3 DOWNLOAD (MinIO -- AWS Signature V4)
-# ============================================================
-
-function Get-S3Object {
-    <#
-    .SYNOPSIS  Download an object from MinIO using AWS Signature V4.
-    .PARAMETER Key      S3 object key (e.g. 'binaries/docker/docker.exe')
-    .PARAMETER OutFile  Local destination path
-    .OUTPUTS   [bool]   $true on success
-    #>
-    param(
-        [Parameter(Mandatory)][string]$Key,
-        [Parameter(Mandatory)][string]$OutFile
-    )
-
-    $endpoint  = $Script:Config.MinioEndpoint
-    $bucket    = $Script:Config.MinioBucket
-    $accessKey = $Script:Config.MinioAccessKey
-    $secretKey = $Script:Config.MinioSecretKey
-    $region    = $Script:Config.MinioRegion
-
-    $uri      = [System.Uri]$endpoint
-    $hostName = $uri.Host
-    if ($uri.Port -ne 443 -and $uri.Port -ne 80) { $hostName = "$($uri.Host):$($uri.Port)" }
-
-    $now       = [DateTime]::UtcNow
-    $dateStamp = $now.ToString('yyyyMMdd')
-    $amzDate   = $now.ToString('yyyyMMddTHHmmssZ')
-
-    $encodedKey       = ($Key -split '/' | ForEach-Object { [System.Uri]::EscapeDataString($_) }) -join '/'
-    $canonicalUri     = "/$bucket/$encodedKey"
-    $payloadHash      = 'UNSIGNED-PAYLOAD'
-    $canonicalHeaders = "host:$hostName`nx-amz-content-sha256:$payloadHash`nx-amz-date:$amzDate`n"
-    $signedHeaders    = 'host;x-amz-content-sha256;x-amz-date'
-    $canonicalRequest = "GET`n$canonicalUri`n`n$canonicalHeaders`n$signedHeaders`n$payloadHash"
-
-    $credentialScope = "$dateStamp/$region/s3/aws4_request"
-    $canonicalHash   = [System.BitConverter]::ToString(
-        [System.Security.Cryptography.SHA256]::Create().ComputeHash(
-            [System.Text.Encoding]::UTF8.GetBytes($canonicalRequest)
-        )
-    ).Replace('-','').ToLower()
-
-    $stringToSign = "AWS4-HMAC-SHA256`n$amzDate`n$credentialScope`n$canonicalHash"
-
-    function HmacSHA256([byte[]]$key, [string]$data) {
-        $hmac = New-Object System.Security.Cryptography.HMACSHA256
-        $hmac.Key = $key
-        return $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($data))
-    }
-
-    $kSecret   = [System.Text.Encoding]::UTF8.GetBytes("AWS4$secretKey")
-    $kDate     = HmacSHA256 $kSecret  $dateStamp
-    $kRegion   = HmacSHA256 $kDate    $region
-    $kService  = HmacSHA256 $kRegion  's3'
-    $kSigning  = HmacSHA256 $kService 'aws4_request'
-    $signature = [System.BitConverter]::ToString((HmacSHA256 $kSigning $stringToSign)).Replace('-','').ToLower()
-
-    $authHeader = "AWS4-HMAC-SHA256 Credential=$accessKey/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
-    $url = "$endpoint/$bucket/$Key"
-
-    $outDir = Split-Path $OutFile -Parent
-    if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory -Force | Out-Null }
-
-    for ($attempt = 1; $attempt -le 3; $attempt++) {
-        try {
-            $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add('Authorization', $authHeader)
-            $wc.Headers.Add('x-amz-content-sha256', $payloadHash)
-            $wc.Headers.Add('x-amz-date', $amzDate)
-            $wc.DownloadFile($url, $OutFile)
-            if (Test-Path $OutFile) {
-                $size = (Get-Item $OutFile).Length
-                if ($size -eq 0) {
-                    throw "Downloaded file is empty (0 bytes)"
-                }
-                # Detect S3/MinIO XML error responses saved as files
-                $head = Get-Content $OutFile -TotalCount 1 -ErrorAction SilentlyContinue
-                if ($head -and ($head -match '^\s*<\?xml' -or $head -match '^\s*<Error')) {
-                    $errContent = Get-Content $OutFile -Raw -ErrorAction SilentlyContinue
-                    Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
-                    throw "MinIO returned an error response: $($errContent.Substring(0, [Math]::Min(200, $errContent.Length)))"
-                }
-                Write-Log "Downloaded $Key -> $OutFile ($size bytes)"
-                return $true
-            }
-        }
-        catch {
-            Write-LogWarn "Download attempt $attempt/3 failed for $Key : $_"
-            Start-Sleep -Seconds ($attempt * 5)
-        }
-    }
-    Write-LogError "FAILED to download $Key after 3 attempts"
-    return $false
-}
-
-# ============================================================
 # LOCAL ARTIFACT SOURCE (Packer model -- repo is uploaded into the guest)
 # ============================================================
-# In the Packer/Terraform model there is no MinIO fetch at build time: Packer's
-# `file` provisioner uploads the whole repo into the guest, so artifacts are read
-# from the uploaded tree. $Script:RepoRoot is the parent of this lib/ directory,
-# so it resolves wherever Packer placed the repo. The artifact catalogs in
-# Config.ps1 (S3Keys / S3KeysExtra / ToolPackages[].S3Key / ObservabilityPackages)
-# carry repo-relative paths (e.g. 'binaries/git/MinGit-2.43.0-64-bit.zip'); these
-# helpers consume those same paths locally. (Get-S3Object below is retained for
-# the legacy Be1 path until it is retired.)
+# There is no MinIO fetch: Packer's `file` provisioner uploads the whole repo
+# into the guest, so artifacts are read from the uploaded tree. $Script:RepoRoot
+# is the parent of this lib/ directory, so it resolves wherever Packer placed the
+# repo. The artifact catalogs in Config.ps1 (S3Keys / S3KeysExtra /
+# ToolPackages[].S3Key / ObservabilityPackages) carry repo-relative paths (e.g.
+# 'binaries/git/MinGit-2.43.0-64-bit.zip'); these helpers consume them locally.
+# (The MinIO SigV4 Get-S3Object was removed with the Be1 retirement.)
 
 # $PSScriptRoot = this lib/ dir when dot-sourced from a path; parent = repo root.
 # Fall back to $PSCommandPath, then the legacy bootstrap dir, if it is empty
@@ -262,35 +164,8 @@ function Test-PEBinary {
     }
 }
 
-function Install-S3Binary {
-    <#
-    .SYNOPSIS  Download an EXE from S3 and validate its PE header.
-    #>
-    param([string]$S3Key, [string]$DestPath, [string]$Label)
-    if (Test-PEBinary $DestPath) { Write-Log "$Label already present"; return $true }
-    $ok = Get-S3Object -Key $S3Key -OutFile $DestPath
-    if ($ok -and (Test-PEBinary $DestPath)) { Write-Log "$Label downloaded and validated"; return $true }
-    Write-LogError "FATAL: $Label -- download or validation failed"
-    return $false
-}
-
-function Install-S3Archive {
-    <#
-    .SYNOPSIS  Download a ZIP from S3 and extract it.
-    #>
-    param([string]$S3Key, [string]$DestDir, [string]$TestFile, [string]$Label)
-    if ($TestFile -and (Test-Path $TestFile)) { Write-Log "$Label already present"; return $true }
-    $zipPath = Join-Path $env:TEMP "s3_$(Split-Path $S3Key -Leaf)"
-    $ok = Get-S3Object -Key $S3Key -OutFile $zipPath
-    if ($ok) {
-        Expand-Archive -Path $zipPath -DestinationPath $DestDir -Force
-        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-        Write-Log "$Label extracted to $DestDir"
-        return $true
-    }
-    Write-LogError "FATAL: $Label -- download failed"
-    return $false
-}
+# (Install-S3Binary / Install-S3Archive removed with the Be1 retirement --
+#  Install-LocalBinary / Install-LocalArchive above are their replacements.)
 
 # ============================================================
 # SERVICE HELPERS
@@ -331,19 +206,10 @@ function Get-DnsServer {
 }
 
 # ============================================================
-# Be1 REBOOT + PHASE MARKERS
+# PHASE MARKERS
 # ============================================================
-
-function Invoke-Be1Reboot {
-    <#
-    .SYNOPSIS  Request a Be1-compatible reboot (POWER_ON + exit 3010).
-    #>
-    param([string]$Reason = 'GitLab Runner setup phase complete')
-    Write-Log "Requesting reboot: $Reason"
-    shutdown.exe /r /t 15 /c $Reason /d p:4:1
-    Write-Output 'POWER_ON'
-    exit 3010
-}
+# (Invoke-Be1Reboot removed with the Be1 retirement -- Packer owns reboots via
+#  the windows-restart provisioner between phases.)
 
 function Set-PhaseMarker {
     <#
