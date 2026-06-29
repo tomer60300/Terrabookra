@@ -5,6 +5,7 @@ provider "registry.terraform.io/hashicorp/vsphere" {
   version     = "2.8.3"
   constraints = "~> 2.8"
   hashes = [
+    "h1:0Oyrmuhb8RkcTR38Dfhg0Xlsf6r6LQJzQ21i0igNpFk=",
     "h1:vrmQ1Vs+bee+TSODMhB6JNYiSoqogvwwMjMtR2HkNVk=",
   ]
 }
