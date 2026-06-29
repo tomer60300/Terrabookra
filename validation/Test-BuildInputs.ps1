@@ -66,7 +66,20 @@ if (-not $SkipInputs) {
     # The S3Bootstrap table is the legacy Be1 self-fetch -- not a build input.
     foreach ($rel in ($relPaths | Sort-Object -Unique)) {
         $abs = Get-RepoPath $rel
-        Note "$rel" (Test-Path $abs)
+        $ok  = Test-Path $abs
+        # Binaries are Git LFS. If the checkout skipped smudge, the file EXISTS but
+        # is a ~130-byte pointer, not the real binary -- check the PE 'MZ' magic so
+        # this fails HERE, not opaquely at the Phase 2 PE check.
+        if ($ok -and $rel -match '\.exe$') {
+            try {
+                $b = [System.IO.File]::ReadAllBytes($abs)
+                if (-not ($b.Length -ge 2 -and $b[0] -eq 0x4D -and $b[1] -eq 0x5A)) {
+                    $ok = $false
+                    Write-Host "       (not a PE binary -- likely an unsmudged LFS pointer: run 'git lfs pull')"
+                }
+            } catch { $ok = $false }
+        }
+        Note "$rel" $ok
     }
 }
 

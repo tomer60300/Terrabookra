@@ -51,6 +51,27 @@ validate:
     - if: $CI_MERGE_REQUEST_ID
 
 # ----------------------------------------------------------------------------
+# Base template -- MANUAL. The golden build clones `ws2019-base`, so this must
+# have run at least once (and again only when the base must change: OS patch,
+# OpenSSH, disk layout). It is deliberately not on the default path so a normal
+# pipeline doesn't rebuild the base every time.
+build-base:
+  stage: build
+  tags: [windows, docker]
+  needs: [validate]
+  variables:
+    PKR_VAR_vcenter_server: $VSPHERE_SERVER
+    PKR_VAR_vcenter_username: $VSPHERE_USER
+    PKR_VAR_vcenter_password: $VSPHERE_PASSWORD
+  script:
+    - packer init packer\base
+    - packer build -var "ssh_password=$BASE_SSH_PASSWORD" packer\base
+  rules:
+    - if: $CI_COMMIT_BRANCH == "terraform"
+      when: manual
+      allow_failure: false
+
+# ----------------------------------------------------------------------------
 build:
   stage: build
   tags: [windows, docker]
@@ -64,9 +85,11 @@ build:
     PKR_VAR_real_gitlab_host: $REAL_GITLAB_HOST
     PKR_VAR_real_gitlab_registry: $REAL_GITLAB_REGISTRY
   script:
-    # The golden build clones the base template (built separately on refresh).
-    # repo_root is the checkout dir; the build-gate (Invoke-FinalValidation) runs
-    # inside Phase 3 and fails `packer build` on a bad image.
+    # Clones the `ws2019-base` template (run `build-base` once first). Materialize
+    # LFS binaries before upload, else Packer ships pointer files (B5). The
+    # build-gate (Invoke-FinalValidation) runs inside Phase 3 and fails on a bad image.
+    - git lfs pull
+    - packer init packer\golden
     - packer build -var "repo_root=$CI_PROJECT_DIR" packer\golden
   artifacts:
     paths:
