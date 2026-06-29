@@ -42,10 +42,9 @@ source "vsphere-clone" "golden" {
   CPUs     = var.cpus
   RAM      = var.ram_mb
 
-  network_adapters {
-    network      = var.network
-    network_card = "vmxnet3"
-  }
+  # vsphere-clone inherits the base template's NIC/portgroup (no network_adapters
+  # block here -- that is a vsphere-iso-only block). Terraform sets the runner's
+  # real portgroup at deploy time.
 
   communicator = "ssh"
   ssh_username = var.ssh_username

@@ -4,13 +4,13 @@
 # data sources fail to resolve the placeholder names (TODO(#12)) -- that is the
 # correct signal that real placement facts are still needed.
 
-vsphere_server   = "vcenter.example.local"     # TODO(#12)
+vsphere_server   = "vcenter.example.local"       # TODO(#12)
 vsphere_user     = "svc-terraform@vsphere.local" # TODO(#12)
 vsphere_password = "CHANGE-ME"
-datacenter       = "DC1"                         # TODO(#12)
-cluster          = "Cluster1"                    # TODO(#12)
-datastore        = "datastore1"                  # TODO(#12)
-network          = "VM Network"                  # TODO(#12)
+datacenter       = "DC1"        # TODO(#12)
+cluster          = "Cluster1"   # TODO(#12)
+datastore        = "datastore1" # TODO(#12)
+network          = "VM Network" # TODO(#12)
 
 golden_template = "ws2019-runner-golden"
 

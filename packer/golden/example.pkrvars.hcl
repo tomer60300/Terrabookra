@@ -3,13 +3,13 @@
 # (uncommitted) *.auto.pkrvars.hcl on the internal leg and fill TODO(#12) facts +
 # secrets. NEVER commit real vCenter/registry creds.
 
-vcenter_server   = "vcenter.example.local"      # TODO(#12)
-vcenter_username = "svc-packer@vsphere.local"    # TODO(#12) least-priv role
+vcenter_server   = "vcenter.example.local"    # TODO(#12)
+vcenter_username = "svc-packer@vsphere.local" # TODO(#12) least-priv role
 vcenter_password = "CHANGE-ME"
-datacenter       = "DC1"                          # TODO(#12)
-cluster          = "Cluster1"                     # TODO(#12)
-datastore        = "datastore1"                   # TODO(#12)
-network          = "VM Network"                   # TODO(#12) build portgroup
+datacenter       = "DC1"        # TODO(#12)
+cluster          = "Cluster1"   # TODO(#12)
+datastore        = "datastore1" # TODO(#12)
+network          = "VM Network" # TODO(#12) build portgroup
 
 base_template_name = "ws2019-base"
 repo_root          = "/abs/path/to/Runners-Infra" # absolute path to the repo tree

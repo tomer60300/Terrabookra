@@ -3,7 +3,7 @@
   Unattended install for the WS2019 LTSC base template.
 
   Purpose: install Windows headless and bring up OpenSSH Server so Packer's SSH
-  communicator (NOT WinRM -- GPO-blocked at Kayhut) connects on first boot.
+  communicator (NOT WinRM; GPO-blocked at Kayhut) connects on first boot.
 
   IMPORTANT (build password): AdministratorPassword below MUST equal the Packer
   var ssh_password (PKR_VAR_ssh_password). It is a BUILD-ONLY credential on a
@@ -14,7 +14,7 @@
   Feature-on-Demand source. On a fully air-gapped build, either (a) attach the
   WS2019 FoD ISO and set the capability source, or (b) pre-bake OpenSSH from the
   bundled tools/openssh/OpenSSH-Win64.zip (same as scripts/Enable-RemoteSSH.ps1).
-  Resolve this on the lab vCenter -- see packer/README.md.
+  Resolve this on the lab vCenter; see packer/README.md.
 
   Image name may need adjusting per ISO (Standard vs Datacenter, Desktop
   Experience). Default targets "Windows Server 2019 SERVERSTANDARD" (Desktop).

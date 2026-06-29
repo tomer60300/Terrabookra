@@ -71,7 +71,7 @@ resource "vsphere_virtual_machine" "runner" {
 
     customize {
       windows_options {
-        computer_name         = each.key
+        computer_name = each.key
         # TODO(#13): domain join. Empty join_domain => workgroup (no join).
         workgroup             = var.join_domain == "" ? "WORKGROUP" : null
         join_domain           = var.join_domain != "" ? var.join_domain : null
