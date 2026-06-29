@@ -50,14 +50,28 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # --- Load Config + Common (logging, Wait-ServiceRunning, markers) ------------
+# On a deployed clone this script lives in C:\GitLab-Runner\scripts, and Phase3-Install
+# staged lib/ to C:\GitLab-Runner\lib -- try that first. Fall back to the repo
+# layout (build/dev) and the raw C:\provision upload.
 $libCandidates = @(
-    (Join-Path (Split-Path $PSScriptRoot -Parent) 'lib'),  # repo layout: ../lib
-    'C:\GitLab-Runner\lib'                                 # on-image layout
+    'C:\GitLab-Runner\lib',                                 # staged by Phase3-Install (clone)
+    (Join-Path (Split-Path $PSScriptRoot -Parent) 'lib'),   # repo layout (../lib)
+    'C:\provision\lib'                                      # raw build upload (fallback)
 )
 $libDir = $libCandidates | Where-Object { Test-Path (Join-Path $_ 'Config.ps1') } | Select-Object -First 1
 if (-not $libDir) { throw 'Cannot locate lib/Config.ps1 (need Config.ps1 + Common.ps1).' }
 . (Join-Path $libDir 'Config.ps1')
 . (Join-Path $libDir 'Common.ps1')
+
+# Make the deploy-gate (Test-RunnerRegistered) available -- it lives in the
+# validation file, which Phase3-Install staged alongside lib/.
+$valCandidates = @(
+    (Join-Path $Script:Config.RunnerDir 'validation\Invoke-FinalValidation.ps1'),
+    (Join-Path (Split-Path $PSScriptRoot -Parent) 'validation\Invoke-FinalValidation.ps1'),
+    'C:\provision\validation\Invoke-FinalValidation.ps1'
+)
+$valFile = $valCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($valFile) { . $valFile } else { Write-LogWarn 'Invoke-FinalValidation.ps1 not found -- deploy-gate will be skipped.' }
 
 $Script:FirstBootMarker = Join-Path $Script:Config.RunnerDir '.firstboot_complete'
 $Script:FirstBootTask   = 'Runner-FirstBoot-Register'

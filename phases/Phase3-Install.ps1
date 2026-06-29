@@ -108,6 +108,23 @@ function Invoke-Phase3Install {
         Write-LogError 'FATAL: Runner binary install failed'; exit 1
     }
 
+    # -- 3.4b Stage runtime modules to a STABLE on-image path -
+    # Deployed clones run Register-RunnerFirstBoot.ps1 from C:\GitLab-Runner\scripts
+    # and must find lib/ + validation/ WITHOUT C:\provision (a build-only upload
+    # that may be cleaned). Stage them under C:\GitLab-Runner so the image is
+    # self-contained at first boot.
+    Write-Log '3.4b Stage lib/ + validation to C:\GitLab-Runner (self-contained image)'
+    foreach ($pair in @(
+        @{ Rel = 'lib/Config.ps1';                        Out = (Join-Path $Script:Config.RunnerDir 'lib\Config.ps1') },
+        @{ Rel = 'lib/Common.ps1';                        Out = (Join-Path $Script:Config.RunnerDir 'lib\Common.ps1') },
+        @{ Rel = 'validation/Invoke-FinalValidation.ps1'; Out = (Join-Path $Script:Config.RunnerDir 'validation\Invoke-FinalValidation.ps1') }
+    )) {
+        if (-not (Copy-RepoFile -RelPath $pair.Rel -OutFile $pair.Out)) {
+            Write-LogError "FATAL: could not stage $($pair.Rel) -- deployed clones could not self-register"
+            $Script:ProvisioningFailed = $true
+        }
+    }
+
     # -- 3.5 GitLab registry login + pre-pull images ----------
     # Images now come from the GitLab Container Registry (Harbor retired). The
     # base/helper images are pulled at build time so deployed runners have them
