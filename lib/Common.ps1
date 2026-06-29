@@ -66,7 +66,13 @@ function Write-Log {
     $dir  = Split-Path $Script:LogFile -Parent
     if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
     $line | Out-File -FilePath $Script:LogFile -Append -Encoding UTF8
-    Write-Output $line
+    # [Console]::WriteLine, NOT Write-Output: Write-Output emits to the success
+    # stream, so any boolean-returning function that logs (Copy-RepoFile,
+    # Install-Local*, Invoke-Registration, Test-AlreadyRegistered, ...) would
+    # return @('<log line>', $bool) -- an ARRAY that is always truthy, making
+    # `if (-not (helper))` fail OPEN on errors. WriteLine reaches stdout (Packer/CI
+    # capture it) without polluting the pipeline.
+    [Console]::WriteLine($line)
 }
 
 function Write-LogError { param([string]$Message) Write-Log -Message $Message -Level 'ERROR' }
@@ -96,7 +102,9 @@ function Get-RepoPath {
     .SYNOPSIS  Resolve a repo-relative artifact path against the uploaded repo root.
     #>
     param([Parameter(Mandatory)][string]$RelPath)
-    return (Join-Path $Script:RepoRoot ($RelPath -replace '/', '\'))
+    # Catalog paths use '/'. Normalize to the platform separator (on Windows that
+    # is '\'; staying platform-correct also keeps the helper testable off-Windows).
+    return (Join-Path $Script:RepoRoot ($RelPath -replace '/', [System.IO.Path]::DirectorySeparatorChar))
 }
 
 function Copy-RepoFile {
