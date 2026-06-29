@@ -57,6 +57,33 @@ A deep code review found a deploy-path blocker and several gaps; all fixed on th
 - **Logging:** `Write-Log` now emits `[component] [runid]`.
 - Token rotation (taint/replace) documented in `terraform/`.
 
+## Dev-leg verification (executed with real tooling)
+Installed Terraform 1.9.8, Packer 1.11.2 (+ vsphere plugin 1.4.0), PowerShell 7.4.6, git-lfs 3.5.1 and
+ran everything below GREEN (see `tests/dev-leg/`):
+
+| Lane | Result |
+|---|---|
+| `terraform fmt -check` + `validate` (real vsphere 2.8.3 schema, filesystem mirror) | PASS |
+| `packer fmt -check` + `validate` base + golden (real vsphere plugin) | PASS |
+| `[Parser]::ParseInput` on every `.ps1` (pwsh 7) | PASS |
+| `xmllint` autounattend.xml | PASS |
+| `Validate-NoAliases` (0 clean / 1 on a hardcoded-host violation) | PASS |
+| logic suite — 13 tests (Config resolution, Common helpers, build/deploy gates; Windows cmdlets mocked) | 13/13 |
+| transfer suite — 10 tests (REAL git + git-lfs bundle/CAS round-trip + SHA-verify + tamper-reject) | 10/10 |
+
+**Bugs the verification found and fixed** (none were caught by static checks alone):
+- `terraform fmt` violations (CI would have failed); `packer` `network_adapters` block invalid on
+  `vsphere-clone` (would fail `packer validate`/build); illegal `--` in autounattend XML comments;
+  linux-only TF lock → regenerated cross-platform (linux+windows).
+- **HIGH:** `Write-Log` emitted via `Write-Output`, so boolean helpers (`Copy-RepoFile`, `Install-Local*`,
+  `Invoke-Registration`, `Test-AlreadyRegistered`) returned `[log, $bool]` arrays — always truthy —
+  making `if (-not (helper))` **fail open** on errors. Fixed (→ `[Console]::WriteLine`).
+- `Get-RepoPath` hardcoded `\` → now uses the platform separator.
+
+**Still UNVERIFIED (lab-only):** `Register-RunnerFirstBoot.ps1` end-to-end (hardcoded `C:\` paths),
+docker-windows containers, vSphere clone + guestinfo delivery, reboot-resume under `windows-restart`,
+full `packer build` / `terraform apply`. pwsh 7 ≠ Windows PS 5.1, and Windows cmdlet behavior is mocked.
+
 ## Naming note
 `Config.ps1` still uses `S3Keys` / `S3KeysExtra` / `ToolPackages[].S3Key` as field names — these are now
 **repo-relative paths consumed locally** (Git LFS / uploaded tree), not MinIO keys. Kept the names to
