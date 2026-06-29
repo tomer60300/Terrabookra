@@ -40,6 +40,23 @@ untouched rollback baseline. Dev/internet leg only — verification is static (`
   `terraform validate` + `fmt -check` are the lab-host step (tools not installed here).
 - `git check-attr` confirms LFS routing; CI YAML parses.
 
+## Post-review remediation (applied)
+A deep code review found a deploy-path blocker and several gaps; all fixed on this branch:
+- **B1/B2 (blocker):** first-boot couldn't find `lib/` → `Phase3-Install` now stages `lib/` +
+  `validation/Invoke-FinalValidation.ps1` to `C:\GitLab-Runner`; `Register-RunnerFirstBoot` broadened its
+  candidates and dot-sources the validation file (deploy-gate now actually runs).
+- **B3:** runner service (SYSTEM) now `docker login`s at first boot using guestinfo registry creds, so
+  runtime private-image pulls work (build-time login ran as a different user).
+- **B4:** added a manual `build-base` CI job (golden clones `ws2019-base`).
+- **B5:** `Test-BuildInputs` magic-byte check + `git lfs pull` in CI catch unsmudged LFS pointers.
+- **B6:** base build installs OpenSSH offline from a `cd_files` zip (FoD fallback) — true offline verify
+  is still a lab step.
+- **B7:** Phase 1 preflight runs `-SkipRegistry` (registry gated at Phase 3 pre-pull instead).
+- **B9/B10/B11:** `Invoke-Phase` honors phase markers; bounded first-boot retry raises Event Log 9015 +
+  `.firstboot_failed`; `C:\provision` is removed from the golden image.
+- **Logging:** `Write-Log` now emits `[component] [runid]`.
+- Token rotation (taint/replace) documented in `terraform/`.
+
 ## Naming note
 `Config.ps1` still uses `S3Keys` / `S3KeysExtra` / `ToolPackages[].S3Key` as field names — these are now
 **repo-relative paths consumed locally** (Git LFS / uploaded tree), not MinIO keys. Kept the names to
