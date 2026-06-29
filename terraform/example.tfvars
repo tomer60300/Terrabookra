@@ -14,6 +14,11 @@ network          = "VM Network"                  # TODO(#12)
 
 golden_template = "ws2019-runner-golden"
 
+# GitLab Container Registry creds for runtime private-image pulls (delivered to
+# each runner via guestinfo). Use a short-lived/least-priv deploy token.
+registry_user = ""
+registry_pass = ""
+
 # TODO(#13) domain join (leave empty to deploy into a workgroup)
 join_domain          = ""
 domain_ou            = ""

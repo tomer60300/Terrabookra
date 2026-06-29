@@ -87,3 +87,18 @@ variable "runners" {
   }))
   default = {}
 }
+
+# --- GitLab Container Registry creds for RUNTIME pulls (delivered via guestinfo) -
+# The SYSTEM runner service logs in with these at first boot so it can pull
+# private images at job time. Prefer a short-lived/least-priv deploy token --
+# guestinfo is readable in-guest. Empty => anonymous (only pre-baked images).
+variable "registry_user" {
+  type    = string
+  default = ""
+}
+
+variable "registry_pass" {
+  type      = string
+  default   = ""
+  sensitive = true
+}

@@ -128,8 +128,10 @@ function Invoke-Phase3Install {
     # -- 3.5 GitLab registry login + pre-pull images ----------
     # Images now come from the GitLab Container Registry (Harbor retired). The
     # base/helper images are pulled at build time so deployed runners have them
-    # cached locally (air-gap). docker login MUST happen before the pull jobs
-    # start so the auth in the SYSTEM profile .docker\config.json is inherited.
+    # cached locally (air-gap). NOTE: this runs as the Packer SSH user
+    # (Administrator), so this login only populates THAT user's .docker\config.json
+    # -- enough to pre-pull here. The runner SERVICE runs as SYSTEM and logs in
+    # again at first boot (Register-RunnerFirstBoot.ps1) for runtime pulls.
     Write-Log '3.5 GitLab registry login + pre-pull container images'
     if ($Script:Config.GitLabRegistryUser -and $Script:Config.GitLabRegistryPass) {
         $glReg = $Script:Config.GitLabRegistry

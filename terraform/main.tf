@@ -85,9 +85,14 @@ resource "vsphere_virtual_machine" "runner" {
   }
 
   # The first-boot contract consumed by provisioners/Register-RunnerFirstBoot.ps1.
+  # registry_user/pass let the SYSTEM runner service log in for RUNTIME private-image
+  # pulls. NOTE: guestinfo is readable in-guest (`vmtoolsd --cmd info-get ...`), so
+  # prefer a short-lived/least-priv registry deploy token here, not a broad PAT.
   extra_config = {
     "guestinfo.runner_token"    = each.value.token
     "guestinfo.runner_hostname" = each.key
+    "guestinfo.registry_user"   = var.registry_user
+    "guestinfo.registry_pass"   = var.registry_pass
   }
 
   lifecycle {

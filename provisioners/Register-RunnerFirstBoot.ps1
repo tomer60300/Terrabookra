@@ -278,6 +278,24 @@ function Invoke-Registration {
         Write-LogError 'gitlab-runner service failed to start.'
         return $false
     }
+
+    # Registry login in THIS (SYSTEM) context so the runner service's
+    # systemprofile .docker\config.json carries creds for RUNTIME private-image
+    # pulls -- the build-time login ran as a different user (Administrator).
+    # Creds arrive per-clone via guestinfo (registry_user/registry_pass); empty
+    # => anonymous (only pre-pulled images will be available). Never logged.
+    $ru = Get-GuestInfo -Key 'registry_user'
+    $rp = Get-GuestInfo -Key 'registry_pass'
+    if ($ru -and $rp) {
+        Write-Log "Registry login as SYSTEM ($(whoami)) -> $($Script:Config.GitLabRegistry) (user '$ru')"
+        $rp | & 'docker' login $Script:Config.GitLabRegistry -u $ru --password-stdin 2>&1 |
+            ForEach-Object { Write-Log "  registry login: $_" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-LogWarn "SYSTEM registry login FAILED (exit $LASTEXITCODE) -- runtime pulls of private images will fail until fixed."
+        }
+    } else {
+        Write-LogWarn 'No guestinfo registry creds -- SYSTEM runner can pull only pre-baked images (anonymous).'
+    }
     return $true
 }
 
