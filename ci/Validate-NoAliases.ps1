@@ -35,9 +35,8 @@ $ErrorActionPreference = 'Stop'
 # Each host alias that must remain a default in Config.ps1, paired with the
 # $env:REAL_* override it must be guarded by.
 $Invariants = @(
-    @{ Alias = 'gitlab.kayhut.com'; Env = 'REAL_GITLAB_HOST'     },
-    @{ Alias = 'kayhut-minio.com';  Env = 'REAL_MINIO_HOST'      },
-    @{ Alias = 'be1.kayhut.com';    Env = 'REAL_BE1_HOST'        }
+    @{ Alias = 'gitlab.kayhut.com'; Env = 'REAL_GITLAB_HOST' },
+    @{ Alias = 'kayhut-minio.com';  Env = 'REAL_MINIO_HOST'  }
 )
 
 Write-Output '============================================'

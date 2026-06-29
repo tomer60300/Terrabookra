@@ -11,3 +11,10 @@ No long-lived secret is baked into the image; secrets arrive at deploy time. Pla
 facts are stubbed (`# TODO(#12)` / `# TODO(#13)`) and block `terraform apply` only — never the Packer
 build. Validate with `terraform validate` + `terraform fmt -check`; `terraform plan` is expected to stop
 at the unresolved `TODO(#12)` facts.
+
+**Token rotation.** `extra_config` carries `ignore_changes` (so a token isn't re-pushed on every apply),
+which means editing a token in tfvars is a **no-op**. Rotation = replace the VM:
+`terraform apply -replace='vsphere_virtual_machine.runner["runner-01"]'` — the fresh clone self-registers
+with the new token at first boot (immutable infrastructure). `registry_user`/`registry_pass` reach the
+runner via guestinfo for runtime private-image pulls; prefer a short-lived/least-priv registry token since
+guestinfo is readable in-guest.

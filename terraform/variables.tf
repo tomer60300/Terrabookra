@@ -78,6 +78,11 @@ variable "domain_join_password" {
 # The token IS a secret: source this map from a gitignored *.auto.tfvars or, on
 # the internal leg, from Vault/CI-injected vars. The token reaches each clone via
 # guestinfo (extra_config), never baked into the image.
+#
+# ROTATION: `extra_config` has `ignore_changes` in main.tf, so editing a token
+# here and re-applying is a NO-OP. To rotate a runner's token you must replace
+# the VM: `terraform apply -replace='vsphere_virtual_machine.runner["runner-01"]'`
+# (immutable-infra: the new clone self-registers with the new token at first boot).
 variable "runners" {
   type = map(object({
     token        = string

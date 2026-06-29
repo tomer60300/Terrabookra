@@ -98,7 +98,17 @@ build {
     ]
   }
 
-  # 5. Manifest -- the build's record (git sha + version are stamped by
+  # 5. Cleanup -- the deployed image is self-contained under C:\GitLab-Runner
+  #    (Phase3-Install staged lib/validation/scripts there). Remove the raw repo
+  #    upload (incl. .git) so source + history don't ship to production (B11).
+  provisioner "powershell" {
+    inline = [
+      "Remove-Item -LiteralPath C:\\provision -Recurse -Force -ErrorAction SilentlyContinue",
+      "if (Test-Path C:\\provision) { Write-Warning 'C:\\provision not fully removed' } else { Write-Output 'C:\\provision cleaned' }",
+    ]
+  }
+
+  # 6. Manifest -- the build's record (git sha + version are stamped by
   #    Write-GoldenVersion inside Phase 3; CI promotes to 2.x.y+<gitsha>).
   post-processor "manifest" {
     output     = "${path.root}/manifest.json"

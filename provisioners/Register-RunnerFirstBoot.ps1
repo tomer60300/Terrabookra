@@ -44,7 +44,8 @@
 param(
     [switch]$InstallStartupTask,
     [string]$SelfPath = $PSCommandPath,
-    [int]$MaxAttempts = 10
+    [int]$MaxAttempts = 10,
+    [int]$MaxBootAttempts = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +63,7 @@ $libDir = $libCandidates | Where-Object { Test-Path (Join-Path $_ 'Config.ps1') 
 if (-not $libDir) { throw 'Cannot locate lib/Config.ps1 (need Config.ps1 + Common.ps1).' }
 . (Join-Path $libDir 'Config.ps1')
 . (Join-Path $libDir 'Common.ps1')
+$Script:Component = 'firstboot'
 
 # Make the deploy-gate (Test-RunnerRegistered) available -- it lives in the
 # validation file, which Phase3-Install staged alongside lib/.
@@ -320,9 +322,31 @@ for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
 }
 
 if (-not $ok) {
-    Write-LogError "First-boot registration did not succeed after $MaxAttempts attempts -- the startup task will retry on next boot."
+    # Cumulative across boots: a permanently-bad token would otherwise loop every
+    # boot forever with no operator signal. After $MaxBootAttempts boots, raise a
+    # visible Event Log error + a breadcrumb so the fleet health check sees it.
+    $attemptsFile = Join-Path $Script:Config.RunnerDir '.firstboot_attempts'
+    $boots = 0
+    if (Test-Path $attemptsFile) { [int]::TryParse((Get-Content $attemptsFile -Raw).Trim(), [ref]$boots) | Out-Null }
+    $boots++
+    $boots | Out-File -FilePath $attemptsFile -Encoding ascii -Force
+    Write-LogError "First-boot registration failed after $MaxAttempts attempts (boot #$boots/$MaxBootAttempts)."
+    if ($boots -ge $MaxBootAttempts) {
+        $msg = "Runner first-boot registration FAILED on $boots boots -- check the runner token / GitLab reachability. Host: $env:COMPUTERNAME."
+        Write-LogError $msg
+        New-Item -Path (Join-Path $Script:Config.RunnerDir '.firstboot_failed') -ItemType File -Force | Out-Null
+        try {
+            if ([System.Diagnostics.EventLog]::SourceExists('GitLabRunner')) {
+                Write-EventLog -LogName Application -Source 'GitLabRunner' -EventId 9015 -EntryType Error -Message $msg -ErrorAction Stop
+            }
+        } catch { Write-LogWarn "Event log write failed (non-fatal): $_" }
+    } else {
+        Write-LogError 'The startup task will retry on next boot.'
+    }
     exit 1
 }
+# Success -- clear the cross-boot attempt counter.
+Remove-Item (Join-Path $Script:Config.RunnerDir '.firstboot_attempts') -Force -ErrorAction SilentlyContinue
 
 # Optional deploy-gate (added by T05). Run it if present; never fatal here.
 if (Get-Command Test-RunnerRegistered -ErrorAction SilentlyContinue) {

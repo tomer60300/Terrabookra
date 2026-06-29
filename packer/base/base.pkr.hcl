@@ -50,11 +50,22 @@ source "vsphere-iso" "base" {
     var.vmtools_iso_path,
   ]
 
-  # autounattend.xml drives the unattended install and enables OpenSSH Server,
-  # which is how Packer's SSH communicator connects from first boot.
+  # autounattend.xml drives the unattended install and runs setup-openssh.ps1
+  # (carried on the cd_files ISO) to enable OpenSSH Server -- how Packer's SSH
+  # communicator connects from first boot.
   floppy_files = [
     "${path.root}/autounattend.xml",
   ]
+
+  # Carry the offline OpenSSH installer + zip into the guest as a CD so the base
+  # build needs NO internet/FoD (B6). The zip is Git LFS -- the build host must
+  # `git lfs pull` first (CI validate/build do). setup-openssh.ps1 scans drives
+  # for OpenSSH-Win64.zip and falls back to Add-WindowsCapability only if absent.
+  cd_files = [
+    "${path.root}/setup-openssh.ps1",
+    "${path.root}/../../tools/openssh/OpenSSH-Win64.zip",
+  ]
+  cd_label = "PROVISION"
 
   # SSH communicator -- explicit (Packer defaults to WinRM on Windows).
   communicator = "ssh"

@@ -41,7 +41,7 @@ $_registryProject  = if ($env:REAL_REGISTRY_PROJECT){ $env:REAL_REGISTRY_PROJECT
 $_minioHost        = if ($env:REAL_MINIO_HOST)      { $env:REAL_MINIO_HOST }      else { 'kayhut-minio.com' }
 $_minioPort        = if ($env:REAL_MINIO_PORT)      { [int]$env:REAL_MINIO_PORT } else { 9000 }
 $_artifactoryHost  = if ($env:REAL_ARTIFACTORY_HOST){ $env:REAL_ARTIFACTORY_HOST }else { 'artifactory-prod' }
-$_be1Host          = if ($env:REAL_BE1_HOST)        { $env:REAL_BE1_HOST }        else { 'be1.kayhut.com' }
+# Be1 is retired; no $_be1Host. (REAL_BE1_HOST no longer consulted.)
 
 # ============================================================
 # CONFIGURATION
@@ -69,6 +69,7 @@ $Script:Config = @{
     # --- Hosts (for InsecureRegistries + MonitorHosts) ---
     GitLabRegistry   = $_gitLabRegistry
     ArtifactoryHost  = $_artifactoryHost
+    # (Be1Host removed -- Be1 orchestrator retired.)
 
     # --- GitLab Container Registry login (Phase 3 step 3.5; pull+push) ---
     # Project/Group Access Token: User = token name, Pass = token value.
@@ -79,8 +80,6 @@ $Script:Config = @{
     # registry password is never baked into the image (migration doc 5.3).
     GitLabRegistryUser = if ($env:REAL_GITLAB_REGISTRY_USER) { $env:REAL_GITLAB_REGISTRY_USER } else { '' }
     GitLabRegistryPass = if ($env:REAL_GITLAB_REGISTRY_PASS) { $env:REAL_GITLAB_REGISTRY_PASS } else { '' }
-
-    Be1Host          = $_be1Host
 
     # --- Paths (C: drive -- OS, binaries, tools) ---
     RunnerDir        = 'C:\GitLab-Runner'
@@ -265,8 +264,7 @@ $Script:Config.InsecureRegistries = @(
 $Script:Config.MonitorHosts = @(
     @{ Host = $_gitLabHost;       Port = 443          },
     @{ Host = $_minioHost;        Port = $_minioPort   },
-    @{ Host = $_artifactoryHost;  Port = 443          },
-    @{ Host = $_be1Host;          Port = 443          }
+    @{ Host = $_artifactoryHost;  Port = 443          }
 )
 
 # ============================================================

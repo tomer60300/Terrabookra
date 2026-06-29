@@ -48,13 +48,21 @@ public class TrustAllCerts {
 
 $Script:LogFile = 'C:\GitLab-Runner\logs\install.log'
 
+# Correlation ID for this invocation (build phase vs first-boot are separable in
+# the shared log) and a component tag the entry script sets (e.g. 'phase1',
+# 'phase3-install', 'firstboot'). Entry scripts may set $Script:Component before
+# logging; both have safe defaults so existing callers are unaffected.
+if (-not $Script:RunId)     { $Script:RunId = [guid]::NewGuid().ToString('N').Substring(0, 8) }
+if (-not $Script:Component) { $Script:Component = 'runner' }
+
 function Write-Log {
     <#
-    .SYNOPSIS  Write a timestamped line to the install log and stdout.
+    .SYNOPSIS  Write a timestamped, tagged line to the install log and stdout.
+               Format: [ts] [LEVEL] [component] [runid] message
     #>
     param([string]$Message, [string]$Level = 'INFO')
     $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $line = "[$ts] [$Level] $Message"
+    $line = "[$ts] [$Level] [$Script:Component] [$Script:RunId] $Message"
     $dir  = Split-Path $Script:LogFile -Parent
     if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
     $line | Out-File -FilePath $Script:LogFile -Append -Encoding UTF8

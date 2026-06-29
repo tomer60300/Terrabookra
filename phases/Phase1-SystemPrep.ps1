@@ -59,11 +59,13 @@ function Invoke-Phase1 {
         exit 1
     }
     # Subprocess -- the script uses `exit`, which would otherwise kill this phase.
-    $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript 2>&1
+    # -SkipRegistry: the registry isn't needed until Phase 3 (pre-pull), and that
+    # pull is the real registry gate. Don't fail Phase 1 on a registry blip.
+    $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript -SkipRegistry 2>&1
     $depExit   = $LASTEXITCODE
     $depResult | ForEach-Object { Write-Log "  preflight: $_" }
     if ($depExit -ne 0) {
-        Write-LogError "FATAL: build-input validation failed ($depExit) -- missing repo artifacts or GitLab registry unreachable."
+        Write-LogError "FATAL: build-input validation failed ($depExit) -- missing repo artifacts (Git LFS not materialized?)."
         exit 1
     }
 

@@ -37,7 +37,9 @@ validate:
     # verify-ps is single-file -- run it over every tracked .ps1; fail if any fail.
     - powershell -NoProfile -ExecutionPolicy Bypass -Command "$bad=0; Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object { & .claude\verify-ps.ps1 -Path $_.FullName; if ($LASTEXITCODE -ne 0) { $bad++ } }; if ($bad) { exit 1 }"
     - powershell -NoProfile -ExecutionPolicy Bypass -File ci\Validate-NoAliases.ps1
-    # LFS binaries must be materialized + GitLab registry reachable.
+    # LFS binaries must be materialized (Test-BuildInputs + packer cd_files need
+    # real files, not pointers) and the GitLab registry reachable.
+    - git lfs pull
     - git lfs fsck
     - powershell -NoProfile -ExecutionPolicy Bypass -File validation\Test-BuildInputs.ps1
     - packer fmt -check -recursive packer

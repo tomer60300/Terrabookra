@@ -39,11 +39,25 @@ $ErrorActionPreference = 'Stop'
 $libDir = Join-Path $RepoRoot 'lib'
 . (Join-Path $libDir 'Config.ps1')
 . (Join-Path $libDir 'Common.ps1')
+$Script:Component = "phase$Phase"
 
 Write-Log "============================================"
 Write-Log "Invoke-Phase -Phase $Phase  (RepoRoot=$RepoRoot)"
 Write-Log "Host: $env:COMPUTERNAME | OS: $([System.Environment]::OSVersion.VersionString) | DataDrive: $Script:DataDrive"
 Write-Log "============================================"
+
+# Existence-only markers make a re-invoked phase idempotent: if Packer retries a
+# provisioner (or the same phase runs twice), skip the already-completed phase
+# instead of redoing its work. A crash mid-phase leaves no marker, so it re-runs.
+$marker = switch ($Phase) {
+    '1' { $Script:Config.Phase1Marker }
+    '2' { $Script:Config.Phase2Marker }
+    '3' { $Script:Config.Phase3Marker }
+}
+if (Test-PhaseComplete $marker) {
+    Write-Log "Phase $Phase marker present ($marker) -- already complete, skipping."
+    exit 0
+}
 
 switch ($Phase) {
     '1' {
