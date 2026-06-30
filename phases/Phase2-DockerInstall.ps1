@@ -107,11 +107,11 @@ $registries
         if ($dockerSvc) {
             Write-Log 'Removing stale Docker service...'
             Stop-Service docker -Force -ErrorAction SilentlyContinue
-            & $dockerdExe --unregister-service 2>&1 | ForEach-Object { Write-Log "  unregister: $_" }
+            & { $ErrorActionPreference = 'Continue'; & $dockerdExe --unregister-service 2>&1 } | ForEach-Object { Write-Log "  unregister: $_" }
             Start-Sleep -Seconds 3
         }
 
-        & $dockerdExe --register-service 2>&1 | ForEach-Object { Write-Log "  register: $_" }
+        & { $ErrorActionPreference = 'Continue'; & $dockerdExe --register-service 2>&1 } | ForEach-Object { Write-Log "  register: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogError 'FATAL: dockerd --register-service failed'
             exit 1

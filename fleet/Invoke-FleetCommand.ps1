@@ -81,6 +81,15 @@ if ($ScriptFile) {
     $payload = $Command
 }
 
+# Password auth cannot work inside Start-Job: the background job has no TTY, so
+# ssh's interactive password prompt can never be answered and every host fails
+# silently (the tool would just report "0/N returned exit 0"). Require key or
+# Kerberos and fail fast and loud instead.
+if (-not $PrivateKey -and -not $KerberosAuth) {
+    Write-Error 'No -PrivateKey or -KerberosAuth supplied. Password auth cannot work inside a background job (no TTY). Pass -PrivateKey <identity-file> or -KerberosAuth.'
+    return
+}
+
 # UTF-16LE base64 -- powershell.exe -EncodedCommand expects exactly this.
 $bytes = [System.Text.Encoding]::Unicode.GetBytes($payload)
 $b64   = [Convert]::ToBase64String($bytes)
@@ -88,7 +97,7 @@ $b64   = [Convert]::ToBase64String($bytes)
 $baseArgs = @(
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'UserKnownHostsFile=~/.ssh/fleet_known_hosts',
-    '-o', 'BatchMode=no',
+    '-o', 'BatchMode=yes',
     '-o', 'ConnectTimeout=10'
 )
 if ($PrivateKey)   { $baseArgs += @('-i', $PrivateKey) }

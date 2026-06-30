@@ -55,7 +55,7 @@ function Invoke-Phase3Install {
                 Start-Sleep -Seconds 10
                 continue
             }
-            $null = docker info 2>&1
+            & { $ErrorActionPreference = 'Continue'; docker info 2>&1 | Out-Null }
             if ($LASTEXITCODE -eq 0) { $dockerReady = $true; Write-Log 'Docker daemon is ready'; break }
         }
         catch { Write-LogWarn "Docker check attempt $i failed: $_" }
@@ -64,8 +64,8 @@ function Invoke-Phase3Install {
     }
     if (-not $dockerReady) { Write-LogError 'FATAL: Docker not ready after 2 minutes'; exit 1 }
 
-    $dockerVersion   = docker version --format '{{.Server.Version}}' 2>$null
-    $dockerIsolation = docker info --format '{{.Isolation}}' 2>$null
+    $dockerVersion   = & { $ErrorActionPreference = 'Continue'; docker version --format '{{.Server.Version}}' 2>$null }
+    $dockerIsolation = & { $ErrorActionPreference = 'Continue'; docker info --format '{{.Isolation}}' 2>$null }
     Write-Log "Docker: version=$dockerVersion isolation=$dockerIsolation"
 
     # -- 3.2 Defender configuration ----------------------------
@@ -136,8 +136,8 @@ function Invoke-Phase3Install {
     if ($Script:Config.GitLabRegistryUser -and $Script:Config.GitLabRegistryPass) {
         $glReg = $Script:Config.GitLabRegistry
         Write-Log "Logging into GitLab registry $glReg as '$($Script:Config.GitLabRegistryUser)'..."
-        $glOut  = $Script:Config.GitLabRegistryPass |
-                  docker login $glReg -u $Script:Config.GitLabRegistryUser --password-stdin 2>&1
+        $glOut  = & { $ErrorActionPreference = 'Continue'; $Script:Config.GitLabRegistryPass |
+                  docker login $glReg -u $Script:Config.GitLabRegistryUser --password-stdin 2>&1 }
         $glCode = $LASTEXITCODE
         $glOut | ForEach-Object { Write-Log "  docker login: $_" }
         if ($glCode -eq 0) {
@@ -160,7 +160,7 @@ function Invoke-Phase3Install {
                 Write-LogWarn "  TCP      : ${glHost}:${glPort} reachable = $glOk"
                 $glTcp.Close()
             } catch { Write-LogWarn "  TCP      : ${glHost}:${glPort} probe error: $($_.Exception.Message)" }
-            $glInfo = (docker info 2>&1 | Out-String)
+            $glInfo = (& { $ErrorActionPreference = 'Continue'; docker info 2>&1 } | Out-String)
             if ($glInfo -match [regex]::Escape($glReg)) {
                 Write-LogWarn "  Insecure : '$glReg' is in 'docker info' (insecure-registries OK)"
             } else {
@@ -236,8 +236,8 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     Write-Log '3.8 Install first-boot registration startup task'
     $firstBootDst = Join-Path $Script:Config.ScriptsDir 'Register-RunnerFirstBoot.ps1'
     if (Copy-RepoFile -RelPath $Script:Config.S3KeysExtra.FirstBootRegister -OutFile $firstBootDst) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $firstBootDst `
-            -InstallStartupTask -SelfPath $firstBootDst 2>&1 |
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $firstBootDst `
+            -InstallStartupTask -SelfPath $firstBootDst 2>&1 } |
             ForEach-Object { Write-Log "  firstboot: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "First-boot task install exited $LASTEXITCODE -- deployed clones would NOT self-register"
@@ -297,10 +297,10 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         Write-LogError 'FATAL: Register-ScheduledTasks.ps1 missing -- maintenance tasks not registered'
         $Script:ProvisioningFailed = $true
     } else {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $regScript `
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $regScript `
             -ScriptsDir $Script:Config.ScriptsDir `
             -LogsDir $Script:Config.LogsDir `
-            -BuildsDir $Script:Config.BuildsDir 2>&1 |
+            -BuildsDir $Script:Config.BuildsDir 2>&1 } |
             ForEach-Object { Write-Log "  tasks: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "Register-ScheduledTasks.ps1 exited $LASTEXITCODE -- task hardening incomplete"
@@ -312,7 +312,7 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
     Write-Log '3.12 Install tools (table-driven via Install-Tools.ps1)'
     $installToolsScr = Join-Path $Script:Config.ScriptsDir 'Install-Tools.ps1'
     if (Test-Path $installToolsScr) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installToolsScr 2>&1 |
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installToolsScr 2>&1 } |
             ForEach-Object { Write-Log "  tools: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogWarn "Install-Tools.ps1 reported $LASTEXITCODE failures -- runner is still operational"
@@ -335,11 +335,11 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
 
     $installOpenCodeScr = Join-Path $Script:Config.ScriptsDir 'Install-OpenCode.ps1'
     if (Test-Path $installOpenCodeScr) {
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installOpenCodeScr `
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installOpenCodeScr `
             -WebView2Installer    $Script:Config.WebView2InstallerLocal `
             -OpenCodeInstaller    $Script:Config.OpenCodeInstallerLocal `
             -OpenCodeConfigSource $Script:Config.OpenCodeJsoncSource `
-            -MachineConfigPath    $Script:Config.OpenCodeMachineFile 2>&1 |
+            -MachineConfigPath    $Script:Config.OpenCodeMachineFile 2>&1 } |
             ForEach-Object { Write-Log "  opencode: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogWarn "Install-OpenCode.ps1 exited $LASTEXITCODE -- runner is functional but OpenCode may not be."
@@ -359,14 +359,14 @@ listen_address = ":$($Script:Config.MetricsPorts.GitLabRunner)"
         Copy-RepoFile -RelPath $Script:Config.ObservabilityPackages.WindowsExporter.S3Key  -OutFile $wxLocal | Out-Null
         Copy-RepoFile -RelPath $Script:Config.ObservabilityPackages.BlackboxExporter.S3Key -OutFile $bbLocal | Out-Null
 
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installObsScr `
+        & { $ErrorActionPreference = 'Continue'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installObsScr `
             -WindowsExporterMsi   $wxLocal `
             -BlackboxExporterZip  $bbLocal `
             -BlackboxInstallDir   $Script:Config.ObservabilityPackages.BlackboxExporter.InstallDir `
             -WindowsExporterPort  $Script:Config.MetricsPorts.WindowsExporter `
             -BlackboxExporterPort $Script:Config.MetricsPorts.BlackboxExporter `
             -RunnerMetricsPort    $Script:Config.MetricsPorts.GitLabRunner `
-            -DockerMetricsPort    $Script:Config.MetricsPorts.Docker 2>&1 |
+            -DockerMetricsPort    $Script:Config.MetricsPorts.Docker 2>&1 } |
             ForEach-Object { Write-Log "  obs: $_" }
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "Install-Observability.ps1 exited $LASTEXITCODE -- observability stack degraded"

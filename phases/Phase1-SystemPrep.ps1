@@ -44,7 +44,9 @@ function Invoke-Phase1 {
             }
         }
     }
-    $preResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preScript 2>&1
+    # & native 2>&1 under EAP=Stop throws on benign child stderr before $LASTEXITCODE
+    # is read; force Continue for the call so success is judged by the exit code.
+    $preResult = & { $ErrorActionPreference = 'Continue'; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $preScript 2>&1 }
     $preExit   = $LASTEXITCODE
     $preResult | ForEach-Object { Write-Log "  preflight: $_" }
     if ($preExit -ne 0) { Write-LogError 'FATAL: environment preflight failed -- aborting'; exit 1 }
@@ -61,7 +63,7 @@ function Invoke-Phase1 {
     # Subprocess -- the script uses `exit`, which would otherwise kill this phase.
     # -SkipRegistry: the registry isn't needed until Phase 3 (pre-pull), and that
     # pull is the real registry gate. Don't fail Phase 1 on a registry blip.
-    $depResult = powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript -SkipRegistry 2>&1
+    $depResult = & { $ErrorActionPreference = 'Continue'; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $depScript -SkipRegistry 2>&1 }
     $depExit   = $LASTEXITCODE
     $depResult | ForEach-Object { Write-Log "  preflight: $_" }
     if ($depExit -ne 0) {

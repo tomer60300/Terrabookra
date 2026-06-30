@@ -132,6 +132,11 @@ function Get-GuestInfo {
     #>
     param([Parameter(Mandatory)][string]$Key)
 
+    # PS5.1: `& native 2>$null` under EAP=Stop throws a terminating error the instant
+    # the process writes to stderr -- vmtoolsd does on a missing key. Force Continue
+    # so a missing/blank guestinfo value falls through to the next source, not throws.
+    $ErrorActionPreference = 'Continue'
+
     # 1. VMware Tools guestinfo
     $vmtoolsd = $null
     $cmd = Get-Command vmtoolsd.exe -ErrorAction SilentlyContinue
@@ -271,7 +276,6 @@ function Invoke-Registration {
             '--registration-token', $token,
             '--executor', 'docker-windows',
             '--docker-image', $defaultImage,
-            '--tls-ca-file', '',
             '--name', "runner-$hostName"
         )
         if ($regRc -ne 0) {
@@ -374,10 +378,18 @@ if (-not $ok) {
 # Success -- clear the cross-boot attempt counter.
 Remove-Item (Join-Path $Script:Config.RunnerDir '.firstboot_attempts') -Force -ErrorAction SilentlyContinue
 
-# Optional deploy-gate (added by T05). Run it if present; never fatal here.
+# Deploy-gate (added by T05). Fatal here: a clone that registered but cannot
+# verify is not operational, so do not set the firstboot marker.
 if (Get-Command Test-RunnerRegistered -ErrorAction SilentlyContinue) {
     if (Test-RunnerRegistered) { Write-Log 'Deploy-gate Test-RunnerRegistered PASSED.' }
-    else { Write-LogWarn 'Deploy-gate Test-RunnerRegistered reported issues -- inspect the log.' }
+    else {
+        Write-LogError 'FATAL: Deploy-gate Test-RunnerRegistered FAILED; leaving firstboot marker unset.'
+        New-Item -Path (Join-Path $Script:Config.RunnerDir '.firstboot_failed') -ItemType File -Force | Out-Null
+        exit 1
+    }
+} else {
+    Write-LogError 'FATAL: deploy-gate Test-RunnerRegistered is unavailable; leaving firstboot marker unset.'
+    exit 1
 }
 
 Set-PhaseMarker $Script:FirstBootMarker
