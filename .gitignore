@@ -1,10 +1,9 @@
-# Binaries (stored in MinIO, not Git — too large for GitHub)
-binaries/docker/
-binaries/git/
-binaries/*.exe
-tools/*.exe
-tools/*.zip
-tools/sysinternals/
+# Build binaries are Git LFS-tracked (see .gitattributes), NOT ignored: they must
+# be committable to LFS for the air-gapped USB transfer (transfer/Export-Transfer
+# copies the LFS CAS). On the public dev leg the real binaries are simply absent
+# (pointer-only); the internal leg carries them via USB.
+# DO NOT re-add blanket binaries/ or tools/ ignores -- that shadows the LFS rules
+# and silently drops the binaries from `git add` (the gitignore-shadows-LFS bug).
 
 # Credentials
 *.env
