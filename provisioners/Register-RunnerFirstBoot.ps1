@@ -50,6 +50,31 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Run a native exe (gitlab-runner / docker), log its combined output, and RETURN
+# its exit code. PS 5.1: `& exe ... 2>&1` under $ErrorActionPreference='Stop'
+# promotes a benign stderr line into a TERMINATING NativeCommandError before
+# $LASTEXITCODE can be read -- force Continue for the native call so success is
+# judged by the exit code. Optional -StdinValue is piped in (e.g. --password-stdin)
+# and is never echoed into a logged argument.
+function Invoke-RunnerNative {
+    param(
+        [Parameter(Mandatory)][string]$Exe,
+        [string[]]$NativeArgs = @(),
+        [string]$Tag = 'native',
+        [string]$StdinValue
+    )
+    $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 0
+    if ($PSBoundParameters.ContainsKey('StdinValue')) {
+        $out = $StdinValue | & $Exe @NativeArgs 2>&1
+    } else {
+        $out = & $Exe @NativeArgs 2>&1
+    }
+    $code = $LASTEXITCODE
+    foreach ($line in @($out)) { if ($null -ne $line) { Write-Log "  ${Tag}: $line" } }
+    return $code
+}
+
 # --- Load Config + Common (logging, Wait-ServiceRunning, markers) ------------
 # On a deployed clone this script lives in C:\GitLab-Runner\scripts, and Phase3-Install
 # staged lib/ to C:\GitLab-Runner\lib -- try that first. Fall back to the repo
@@ -233,20 +258,22 @@ function Invoke-Registration {
     if (-not $isAuthToken) {
         Write-Log 'Registering runner with GitLab (registration token / PAT)'
         $defaultImage = "$($Script:Config.RegistryHost)/$($Script:Config.RegistryProject)/servercore:ltsc2019"
-        # Capture output + exit code BEFORE the logging pipeline: `2>&1 | ForEach`
-        # under ErrorActionPreference='Stop' can turn a stderr line into a
-        # terminating error, and the trailing cmdlet would leave $LASTEXITCODE
-        # reflecting the cmdlet, not gitlab-runner.
-        $regOut = & $Script:Config.RunnerBin register `
-            --non-interactive `
-            --url $Script:Config.GitLabUrl `
-            --registration-token $token `
-            --executor docker-windows `
-            --docker-image $defaultImage `
-            --tls-ca-file "" `
-            --name "runner-$hostName" 2>&1
-        $regRc = $LASTEXITCODE
-        $regOut | ForEach-Object { Write-Log "  register: $_" }
+        # --config is REQUIRED: without it gitlab-runner writes the emitted glrt-
+        # token to its DEFAULT config path, and the extraction below (which reads
+        # $Script:Config.ConfigToml) would never find it -- the whole PAT path would
+        # abort. Invoke-RunnerNative forces ErrorActionPreference=Continue so a
+        # benign stderr line can't throw under Stop before the exit code is read.
+        $regRc = Invoke-RunnerNative -Exe $Script:Config.RunnerBin -Tag 'register' -NativeArgs @(
+            'register',
+            '--non-interactive',
+            '--config', $Script:Config.ConfigToml,
+            '--url', $Script:Config.GitLabUrl,
+            '--registration-token', $token,
+            '--executor', 'docker-windows',
+            '--docker-image', $defaultImage,
+            '--tls-ca-file', '',
+            '--name', "runner-$hostName"
+        )
         if ($regRc -ne 0) {
             Write-LogError "Runner registration FAILED (exit $regRc) -- token invalid or GitLab unreachable."
             return $false
@@ -267,14 +294,13 @@ function Invoke-Registration {
     # Install + start the runner service (idempotent)
     if (Get-Service gitlab-runner -ErrorAction SilentlyContinue) {
         Write-Log '  Existing gitlab-runner service -- stop + uninstall before reinstall'
-        & $Script:Config.RunnerBin stop      2>&1 | ForEach-Object { Write-Log "  stop: $_" }
-        & $Script:Config.RunnerBin uninstall 2>&1 | ForEach-Object { Write-Log "  uninstall: $_" }
+        [void](Invoke-RunnerNative -Exe $Script:Config.RunnerBin -Tag 'stop'      -NativeArgs @('stop'))
+        [void](Invoke-RunnerNative -Exe $Script:Config.RunnerBin -Tag 'uninstall' -NativeArgs @('uninstall'))
         Start-Sleep -Seconds 2
     }
-    & $Script:Config.RunnerBin install `
-        --working-directory $Script:Config.RunnerDir `
-        --config $Script:Config.ConfigToml 2>&1 | ForEach-Object { Write-Log "  install: $_" }
-    & $Script:Config.RunnerBin start 2>&1 | ForEach-Object { Write-Log "  start: $_" }
+    [void](Invoke-RunnerNative -Exe $Script:Config.RunnerBin -Tag 'install' -NativeArgs @(
+        'install', '--working-directory', $Script:Config.RunnerDir, '--config', $Script:Config.ConfigToml))
+    [void](Invoke-RunnerNative -Exe $Script:Config.RunnerBin -Tag 'start' -NativeArgs @('start'))
 
     if (-not (Wait-ServiceRunning -Name 'gitlab-runner' -TimeoutSeconds 30 -PollSeconds 3)) {
         Write-LogError 'gitlab-runner service failed to start.'
@@ -290,10 +316,10 @@ function Invoke-Registration {
     $rp = Get-GuestInfo -Key 'registry_pass'
     if ($ru -and $rp) {
         Write-Log "Registry login as SYSTEM ($(whoami)) -> $($Script:Config.GitLabRegistry) (user '$ru')"
-        $rp | & 'docker' login $Script:Config.GitLabRegistry -u $ru --password-stdin 2>&1 |
-            ForEach-Object { Write-Log "  registry login: $_" }
-        if ($LASTEXITCODE -ne 0) {
-            Write-LogWarn "SYSTEM registry login FAILED (exit $LASTEXITCODE) -- runtime pulls of private images will fail until fixed."
+        $loginRc = Invoke-RunnerNative -Exe 'docker' -Tag 'registry login' -StdinValue $rp -NativeArgs @(
+            'login', $Script:Config.GitLabRegistry, '-u', $ru, '--password-stdin')
+        if ($loginRc -ne 0) {
+            Write-LogWarn "SYSTEM registry login FAILED (exit $loginRc) -- runtime pulls of private images will fail until fixed."
         }
     } else {
         Write-LogWarn 'No guestinfo registry creds -- SYSTEM runner can pull only pre-baked images (anonymous).'

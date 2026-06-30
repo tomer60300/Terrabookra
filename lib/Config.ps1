@@ -38,9 +38,9 @@ $Script:DataDrive = if (Test-Path 'E:\') { 'E:' } else { 'C:' }
 $_gitLabHost       = if ($env:REAL_GITLAB_HOST)     { $env:REAL_GITLAB_HOST }     else { 'gitlab.kayhut.com' }
 $_gitLabRegistry   = if ($env:REAL_GITLAB_REGISTRY) { $env:REAL_GITLAB_REGISTRY } else { "${_gitLabHost}:5050" }
 $_registryProject  = if ($env:REAL_REGISTRY_PROJECT){ $env:REAL_REGISTRY_PROJECT }else { 'golden-image' }
-$_minioHost        = if ($env:REAL_MINIO_HOST)      { $env:REAL_MINIO_HOST }      else { 'kayhut-minio.com' }
-$_minioPort        = if ($env:REAL_MINIO_PORT)      { [int]$env:REAL_MINIO_PORT } else { 9000 }
 $_artifactoryHost  = if ($env:REAL_ARTIFACTORY_HOST){ $env:REAL_ARTIFACTORY_HOST }else { 'artifactory-prod' }
+# MinIO is RETIRED with the Be1/SigV4 artifact plane -- no $_minioHost. Build
+# inputs travel via Git LFS; container images come from the GitLab registry.
 # Be1 is retired; no $_be1Host. (REAL_BE1_HOST no longer consulted.)
 
 # ============================================================
@@ -262,9 +262,8 @@ $Script:Config.InsecureRegistries = @(
 )
 
 $Script:Config.MonitorHosts = @(
-    @{ Host = $_gitLabHost;       Port = 443          },
-    @{ Host = $_minioHost;        Port = $_minioPort   },
-    @{ Host = $_artifactoryHost;  Port = 443          }
+    @{ Host = $_gitLabHost;       Port = 443 },
+    @{ Host = $_artifactoryHost;  Port = 443 }
 )
 
 # ============================================================

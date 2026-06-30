@@ -16,13 +16,13 @@
       [WARN] Windows Server edition + build 17763 (LTSC 2019 -- the pinned target)
       [HARD] .NET ZipFile type available (zip extraction is load-bearing)
       [HARD] Config.ps1 loads and $Script:Config is populated
-      [HARD] MinIO AccessKey/SecretKey are set and NOT the 'YOUR_*' placeholders
-      [HARD] MinIO endpoint is a parseable URL; bucket + GitLabUrl non-empty
+      [HARD] GitLab URL / registry / registry-project are set (MinIO is retired)
+      [HARD] GitLab URL is a parseable absolute URL
       [WARN] GITLAB_RUNNER_TOKEN present (Phase 3 hard-checks it later)
       [HARD] Data drive resolves to a FIXED NTFS volume (not DVD/USB)
       [HARD] Core directories are creatable (RunnerDir, LogsDir)
       [FIX ] Event-log source 'GitLabRunner' exists (created here if missing)
-      [WARN] MinIO endpoint host:port is TCP-reachable
+      [WARN] GitLab endpoint host:port is TCP-reachable
 
     The event-log source check is the one that also *fixes*: it registers the
     source if absent so every later Write-EventLog (watchdogs, disk-monitor,
@@ -204,7 +204,7 @@ try {
     }
 } catch { Write-Check WARN "Could not ensure event-log source: $($_.Exception.Message)" }
 
-# --- MinIO endpoint TCP reachability (soft) ----------------------------------
+# --- GitLab endpoint TCP reachability (soft) ---------------------------------
 if ($Script:Config -and $parsed) {
     $epHost = $parsed.Host
     $epPort = if ($parsed.Port -gt 0) { $parsed.Port } else { 443 }
@@ -212,12 +212,12 @@ if ($Script:Config -and $parsed) {
         $tcp = New-Object System.Net.Sockets.TcpClient
         $iar = $tcp.BeginConnect($epHost, $epPort, $null, $null)
         if ($iar.AsyncWaitHandle.WaitOne(3000) -and $tcp.Connected) {
-            Write-Check PASS "MinIO endpoint reachable ($epHost`:$epPort)"
+            Write-Check PASS "GitLab endpoint reachable ($epHost`:$epPort)"
         } else {
-            Write-Check WARN "MinIO endpoint ${epHost}:${epPort} not reachable in 3s -- check DNS/hosts/network (Test-Dependencies probes deeper)"
+            Write-Check WARN "GitLab endpoint ${epHost}:${epPort} not reachable in 3s -- check DNS/hosts/network (Test-Dependencies probes deeper)"
         }
         $tcp.Close()
-    } catch { Write-Check WARN "MinIO endpoint ${epHost}:${epPort} probe error: $($_.Exception.Message)" }
+    } catch { Write-Check WARN "GitLab endpoint ${epHost}:${epPort} probe error: $($_.Exception.Message)" }
 }
 
 # --- Verdict -----------------------------------------------------------------

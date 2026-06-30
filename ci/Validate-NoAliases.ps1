@@ -35,9 +35,11 @@ $ErrorActionPreference = 'Stop'
 # Each host alias that must remain a default in Config.ps1, paired with the
 # $env:REAL_* override it must be guarded by.
 $Invariants = @(
-    @{ Alias = 'gitlab.kayhut.com'; Env = 'REAL_GITLAB_HOST' },
-    @{ Alias = 'kayhut-minio.com';  Env = 'REAL_MINIO_HOST'  }
+    @{ Alias = 'gitlab.kayhut.com'; Env = 'REAL_GITLAB_HOST'      },
+    @{ Alias = 'artifactory-prod';  Env = 'REAL_ARTIFACTORY_HOST' }
 )
+# MinIO is retired, so its alias no longer lives in Config -- it is not asserted.
+# The GitLab registry alias derives from $_gitLabHost, so REAL_GITLAB_HOST covers it.
 
 Write-Output '============================================'
 Write-Output 'Validate-NoAliases -- alias-by-resolution invariant (decision 3)'

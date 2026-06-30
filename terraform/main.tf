@@ -37,6 +37,7 @@ resource "vsphere_virtual_machine" "runner" {
   name             = each.key
   resource_pool_id = data.vsphere_compute_cluster.cluster.resource_pool_id
   datastore_id     = data.vsphere_datastore.ds.id
+  folder           = var.vm_folder
 
   num_cpus = each.value.cpus
   memory   = each.value.memory_mb

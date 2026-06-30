@@ -46,6 +46,11 @@ function Invoke-Git {
     # callers can safely .Trim() it. $LASTEXITCODE is read immediately after the
     # native call -- never across a later function boundary (PS 5.1 staleness).
     param([Parameter(Mandatory)][string[]]$GitArgs, [switch]$AllowFail)
+    # PS 5.1: `& native 2>&1` under $ErrorActionPreference='Stop' promotes git's
+    # normal stderr (e.g. 'From <bundle>' on fetch) to a TERMINATING
+    # NativeCommandError before $LASTEXITCODE can be read. Force Continue for the
+    # native call so we judge success by the exit code, not by stderr presence.
+    $ErrorActionPreference = 'Continue'
     $global:LASTEXITCODE = 0
     $raw  = & git -C $RepoRoot @GitArgs 2>&1
     $code = $LASTEXITCODE

@@ -68,14 +68,20 @@ if (-not $SkipInputs) {
         $abs = Get-RepoPath $rel
         $ok  = Test-Path $abs
         # Binaries are Git LFS. If the checkout skipped smudge, the file EXISTS but
-        # is a ~130-byte pointer, not the real binary -- check the PE 'MZ' magic so
-        # this fails HERE, not opaquely at the Phase 2 PE check.
-        if ($ok -and $rel -match '\.exe$') {
+        # is a ~130-byte pointer text, not the real binary. Detect the LFS pointer
+        # signature for EVERY tracked input (.exe/.zip/.msi alike) so this fails
+        # HERE, not opaquely at a later extract/PE check. (The old guard only
+        # covered .exe via the PE 'MZ' magic and let unsmudged ZIP/MSI pointers --
+        # MinGit, windows_exporter, sysinternals -- pass the gate green.)
+        if ($ok) {
             try {
-                $b = [System.IO.File]::ReadAllBytes($abs)
-                if (-not ($b.Length -ge 2 -and $b[0] -eq 0x4D -and $b[1] -eq 0x5A)) {
-                    $ok = $false
-                    Write-Host "       (not a PE binary -- likely an unsmudged LFS pointer: run 'git lfs pull')"
+                $fi = Get-Item $abs
+                if ($fi.Length -lt 1024) {
+                    $head = [System.IO.File]::ReadAllText($abs)
+                    if ($head -match 'version https://git-lfs\.github\.com/spec') {
+                        $ok = $false
+                        Write-Host "       (unsmudged Git LFS pointer, not the real binary: run 'git lfs pull')"
+                    }
                 }
             } catch { $ok = $false }
         }

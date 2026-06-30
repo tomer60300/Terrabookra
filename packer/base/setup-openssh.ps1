@@ -56,6 +56,13 @@ if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction Silentl
     New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
         -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Enabled True | Out-Null
 }
+# The offline install-sshd.ps1 registers the sshd service but does NOT create the
+# HKLM:\SOFTWARE\OpenSSH key. New-ItemProperty does not create a missing parent key
+# (-Force only overwrites an existing value), so under $ErrorActionPreference='Stop'
+# the next line throws and fails the base build on the air-gap path -- create it first.
+if (-not (Test-Path 'HKLM:\SOFTWARE\OpenSSH')) {
+    New-Item -Path 'HKLM:\SOFTWARE\OpenSSH' -Force | Out-Null
+}
 New-ItemProperty -Path 'HKLM:\SOFTWARE\OpenSSH' -Name DefaultShell `
     -Value 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -PropertyType String -Force | Out-Null
 Log 'OpenSSH ready (sshd running, port 22 open, PowerShell default shell).'
