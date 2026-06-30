@@ -4,13 +4,13 @@
 # DO NOT add vra_refresh_token here. Pass it only through:
 #   $env:TF_VAR_vra_refresh_token = '<masked process env token>'
 
-vra_url      = "https://be1.kayhut.com"
-vra_insecure = true
+vra_url      = "https://aria.YOUR-DOMAIN.example"   # the internal Aria/Service-Broker URL
+vra_insecure = true                                 # true only for an approved self-signed endpoint
 
-project_name         = "Runners-Infra"
-catalog_item_name    = "Windows Server 2019 GitLab Runner"
-catalog_item_version = "1"
-deployment_name      = "gitlab-runner-ws2019-01"
+project_name         = "YOUR_ARIA_PROJECT"                  # existing Aria project name
+catalog_item_name    = "YOUR_WINDOWS_RUNNER_CATALOG_ITEM"   # existing Service Broker catalog item
+catalog_item_version = "1"                                  # explicit version -- do not rely on latest
+deployment_name      = "gitlab-runner-ws2019-01"            # stable, meaningful deployment name
 deployment_reason    = "Provision WS2019 GitLab runner through Service Broker catalog"
 
 # Values are strings on purpose. The vmware/vra provider reads the catalog item

@@ -316,6 +316,15 @@ function Invoke-Registration {
     # pulls -- the build-time login ran as a different user (Administrator).
     # Creds arrive per-clone via guestinfo (registry_user/registry_pass); empty
     # => anonymous (only pre-pulled images will be available). Never logged.
+    # Wait for the docker daemon to be ready before the SYSTEM login -- on a cold
+    # first boot docker may still be starting, which would otherwise log a spurious
+    # registry-login failure (PH-03). Native stderr kept from throwing under Stop.
+    for ($i = 1; $i -le 12; $i++) {
+        & { $ErrorActionPreference = 'Continue'; docker info 2>&1 | Out-Null }
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 5
+    }
+
     $ru = Get-GuestInfo -Key 'registry_user'
     $rp = Get-GuestInfo -Key 'registry_pass'
     if ($ru -and $rp) {

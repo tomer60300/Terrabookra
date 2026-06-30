@@ -12,7 +12,7 @@ datastore        = "datastore1" # TODO(#12)
 network          = "VM Network" # TODO(#12) build portgroup
 
 base_template_name = "ws2019-base"
-repo_root          = "/abs/path/to/Runners-Infra" # absolute path to the repo tree
+repo_root          = "C:/path/to/runner-repo" # absolute path to the repo tree (set on the build host)
 
 ssh_password = "BuildOnly-ChangeMe-Match-PKR_VAR_ssh_password!"
 

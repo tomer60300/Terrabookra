@@ -6,6 +6,13 @@
 #   terraform providers mirror /path/to/terraform-plugins
 #
 # Adjust the path to wherever the mirror lands on the internal leg.
+#
+# PATH RESOLUTION: a relative filesystem_mirror path resolves against Terraform's
+# working directory, NOT this file's location. Always invoke Terraform as
+# `terraform -chdir=terraform ...` (as the CI jobs + README runbook do) so the
+# working dir is terraform/ and `../dist/providers` lands on <repo>/dist/providers.
+# VERIFIED: offline `init` installs vmware/vra 0.17.2 from the mirror this way.
+# (If you invoke Terraform from a different CWD, use an absolute path here instead.)
 provider_installation {
   filesystem_mirror {
     path    = "../dist/providers"
