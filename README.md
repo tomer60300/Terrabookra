@@ -2,11 +2,12 @@
 
 Automated provisioning of GitLab Runner VMs for an air-gapped Windows Server 2019 environment.
 
-> **`terraform` branch:** the build moved off Be1 to **Packer + Terraform**. Packer builds one generic,
-> **unregistered** golden image (phases run over SSH with `windows-restart` between them); Terraform
-> deploys runners that **self-register at first boot** from vSphere `guestinfo`. Artifacts travel via
-> **Git LFS**; images come from the **GitLab Container Registry**. MinIO + Be1 are retired. `main`
-> remains the Be1 line (rollback baseline) and matches the older description below.
+> **`terraform` branch:** runner deployment is now the infra_tf-compatible **Aria Service Broker
+> catalog path**. Terraform `1.0.5` uses `vmware/vra` `0.17.2` from the offline mirror, requests an
+> existing Windows-runner catalog item, and passes string-only `vm_inputs`. The Aria CSP refresh token
+> is supplied only through `TF_VAR_vra_refresh_token`. The old Packer/vSphere spike remains in the tree
+> as historical work, but it is no longer the CI deploy path for runners. `main` remains the Be1 rollback
+> baseline and matches the older description below.
 > See `docs/MIGRATION-TO-TERRAFORM.md` + `docs/MIGRATION-STATUS.md`.
 
 On `main`, a single orchestrator (`Bootstrap-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a
@@ -24,7 +25,7 @@ freshly provisioned VM and dispatches modular phases that produce a fully operat
 | Docker | 25.0.15 (raw binaries, process isolation) |
 | Container images | GitLab Container Registry (`terraform` branch; Harbor on `main`) |
 | Artifact store | Git LFS + uploaded repo (`terraform` branch; MinIO S3 on `main`) |
-| Build / deploy | Packer + Terraform (`terraform` branch; VMware Aria/Be1 on `main`) |
+| Build / deploy | Aria Service Broker catalog via Terraform (`terraform` branch; VMware Aria/Be1 on `main`) |
 
 ---
 

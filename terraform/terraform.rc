@@ -8,10 +8,7 @@
 # Adjust the path to wherever the mirror lands on the internal leg.
 provider_installation {
   filesystem_mirror {
-    path    = "/opt/terraform-plugins"
-    include = ["hashicorp/vsphere"]
-  }
-  direct {
-    exclude = ["hashicorp/vsphere"]
+    path    = "../dist/providers"
+    include = ["vmware/vra"]
   }
 }

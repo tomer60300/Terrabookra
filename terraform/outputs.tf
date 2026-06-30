@@ -1,14 +1,24 @@
-output "runner_names" {
-  description = "Deployed runner VM names."
-  value       = [for r in vsphere_virtual_machine.runner : r.name]
+output "deployment_id" {
+  description = "Aria deployment id."
+  value       = module.aria_vm.deployment_id
 }
 
-output "runner_ips" {
-  description = "Default IPv4 of each runner (populated after VMware Tools reports)."
-  value       = { for k, r in vsphere_virtual_machine.runner : k => r.default_ip_address }
+output "deployment_name" {
+  description = "Aria deployment name."
+  value       = module.aria_vm.deployment_name
 }
 
-output "runner_uuids" {
-  description = "vSphere UUIDs (handy for targeted taint/replace on token rotation)."
-  value       = { for k, r in vsphere_virtual_machine.runner : k => r.uuid }
+output "deployment_status" {
+  description = "Aria deployment lifecycle status."
+  value       = module.aria_vm.deployment_status
+}
+
+output "catalog_item_id" {
+  description = "Resolved catalog item id."
+  value       = module.aria_vm.catalog_item_id
+}
+
+output "project_id" {
+  description = "Resolved Aria project id."
+  value       = module.aria_vm.project_id
 }

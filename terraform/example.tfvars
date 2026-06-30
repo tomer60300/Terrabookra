@@ -1,33 +1,28 @@
-# Example tfvars -- PLACEHOLDER values. Copy to a gitignored *.auto.tfvars on the
-# internal leg and fill the TODO(#12)/(#13) facts + the real runner tokens.
-# `terraform plan` with these placeholders is EXPECTED to stop when the vCenter
-# data sources fail to resolve the placeholder names (TODO(#12)) -- that is the
-# correct signal that real placement facts are still needed.
+# Example tfvars for the Aria catalog-deployment path.
+# Copy to a gitignored *.auto.tfvars on the internal leg and fill real names.
+#
+# DO NOT add vra_refresh_token here. Pass it only through:
+#   $env:TF_VAR_vra_refresh_token = '<masked process env token>'
 
-vsphere_server   = "vcenter.example.local"       # TODO(#12)
-vsphere_user     = "svc-terraform@vsphere.local" # TODO(#12)
-vsphere_password = "CHANGE-ME"
-datacenter       = "DC1"        # TODO(#12)
-cluster          = "Cluster1"   # TODO(#12)
-datastore        = "datastore1" # TODO(#12)
-network          = "VM Network" # TODO(#12)
+vra_url      = "https://be1.kayhut.com"
+vra_insecure = true
 
-golden_template = "ws2019-runner-golden"
+project_name         = "Runners-Infra"
+catalog_item_name    = "Windows Server 2019 GitLab Runner"
+catalog_item_version = "1"
+deployment_name      = "gitlab-runner-ws2019-01"
+deployment_reason    = "Provision WS2019 GitLab runner through Service Broker catalog"
 
-# GitLab Container Registry creds for runtime private-image pulls (delivered to
-# each runner via guestinfo). Use a short-lived/least-priv deploy token.
-registry_user = ""
-registry_pass = ""
-
-# TODO(#13) domain join (leave empty to deploy into a workgroup)
-join_domain          = ""
-domain_ou            = ""
-domain_join_user     = ""
-domain_join_password = ""
-
-# Runner fleet. Tokens are SECRETS -- keep the real values in a gitignored
-# *.auto.tfvars (or inject from Vault/CI), not here.
-runners = {
-  "runner-01" = { token = "glrt-REPLACE_ME" }
-  # "runner-02" = { token = "glrt-REPLACE_ME", cpus = 16, memory_mb = 49152, data_disk_gb = 1024 }
+# Values are strings on purpose. The vmware/vra provider reads the catalog item
+# schema and converts these strings to the schema-native types during request.
+# Replace the keys below with the real Aria catalog item input names.
+vm_inputs = {
+  hostname          = "gitlab-runner-ws2019-01"
+  os_version        = "windows-server-2019"
+  runner_executor   = "docker-windows"
+  container_os      = "ltsc2019"
+  process_isolation = "true"
+  cpu_count         = "24"
+  memory_mb         = "65536"
+  data_disk_gb      = "2048"
 }

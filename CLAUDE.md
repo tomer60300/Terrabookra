@@ -3,13 +3,11 @@
 GitLab Runner **golden-image provisioner** for an **air-gapped** Windows Server 2019 LTSC fleet.
 PowerShell 5.1.
 
-> **`terraform` branch (current): the build moved off Be1 to Packer + Terraform.**
-> Packer builds ONE generic, **unregistered** golden image (phases run over SSH with `windows-restart`
-> between them); Terraform deploys runners that **self-register at first boot** from vSphere `guestinfo`.
-> MinIO is retired (artifacts via **Git LFS** + the uploaded repo tree); images come from the **GitLab
-> Container Registry** (Harbor retired). `main` still holds the Be1 line as the rollback baseline — where
-> this file's older "Be1 / MinIO / Harbor" wording still applies. See `docs/MIGRATION-STATUS.md` and
-> `docs/MIGRATION-TO-TERRAFORM.md`.
+> **`terraform` branch (current): runner deployment uses the infra_tf Aria catalog path.**
+> Terraform `1.0.5` uses `vmware/vra` `0.17.2` from the offline mirror and requests an existing
+> Service Broker catalog item. The Aria CSP refresh token is passed only through
+> `TF_VAR_vra_refresh_token`. The old Packer/vSphere spike remains as historical work, but it is not
+> the runner deploy CI path. `main` still holds the Be1 line as the rollback baseline.
 
 ## Two environments — know which leg you're on
 This project lives in **two separate worlds**. Getting this wrong is the #1 source of confusion.
@@ -37,33 +35,25 @@ This project lives in **two separate worlds**. Getting this wrong is the #1 sour
 - **WinRM is GPO-blocked** at Kayhut. SSH (OpenSSH) is the remote control plane (enabled by Phase 1
   step 1.11; fleet management uses SSH too). Do not reintroduce WinRM / `Invoke-Command`.
 
-## How a build runs (`terraform` branch — Packer/Terraform)
-- **Packer is the orchestrator** (replaces Be1). `packer/base` builds a WS2019 template with OpenSSH
-  baked in (autounattend); `packer/golden` clones it, uploads the repo (`file` provisioner), and runs
-  `provisioners/Invoke-Phase.ps1 -Phase 1|2|3` over the **SSH communicator** with `windows-restart`
-  between phases. **No `3010` self-reboot, no MinIO self-fetch, no marker dispatch** — Packer owns
-  sequencing. Phases still set `.phaseN_complete` markers (existence-only) as idempotency, not the driver.
-- **Phase 3 is build-time only** (`phases/Phase3-Install.ps1`, `Invoke-Phase3Install`): Docker verify,
-  runner **binary** install, image pre-pull (GitLab registry), tools/observability, and a **token-less
-  `config.toml` skeleton**. It does NOT resolve a token, register, or install the runner service — the
-  image ships **generic + unregistered**.
-- **First boot (deployed clone):** `provisioners/Register-RunnerFirstBoot.ps1` (SYSTEM startup task,
-  installed at build) reads `guestinfo.runner_token` + `guestinfo.runner_hostname` via
-  `vmtoolsd --cmd "info-get guestinfo.<k>"`, writes the final `config.toml`, registers if needed, and
-  installs+starts the runner service. Idempotent + retry.
-- **Two gates:** build-gate = `validation/Invoke-FinalValidation` (image-correctness; runs inside Phase 3,
-  fails `packer build`); deploy-gate = `Test-RunnerRegistered` (service running + `gitlab-runner verify`
-  + tasks/sshd/exporters; runs at first boot / CI acceptance).
-- **Artifacts:** no MinIO. Binaries travel via **Git LFS** and are read from the uploaded repo tree
-  (`Copy-RepoFile` / `Install-LocalBinary` / `Install-LocalArchive`). Images come from the **GitLab
-  Container Registry**. The deployed fleet is queried from an admin PC over **SSH**, not WinRM.
+## How a deploy runs (`terraform` branch — infra_tf / Aria)
+- **Terraform is deploy-only.** `terraform/` calls `module/aria-vm`, which resolves the existing Aria
+  project and Service Broker catalog item, then requests `vra_deployment`.
+- **No direct vCenter in the deploy path.** Do not reintroduce `hashicorp/vsphere`, `vsphere_*`, or
+  vCenter credentials in Terraform/CI.
+- **Offline runtime is mandatory.** Use `dist/bin/terraform.exe` (exactly 1.0.5), `dist/providers/`,
+  `terraform/terraform.rc`, and the committed lock file.
+- **Token discipline:** pass the Aria CSP refresh token only as `TF_VAR_vra_refresh_token`. Never commit
+  it, place it in tfvars, print it, or pass it on command lines.
+- **Preflight before apply:** `scripts/Test-AriaTerraformPreflight.ps1` catches missing runtime/mirror,
+  token-source mistakes, wrong provider locks, direct-vCenter drift, non-string `vm_inputs`, and Aria
+  reachability/auth problems.
 
 ## Repo layout
-- `packer/` — `base/` (vsphere-iso + `autounattend.xml`, OpenSSH/SSH communicator) and `golden/`
-  (vsphere-clone + repo upload + phase provisioners + build-gate). `example.pkrvars.hcl` are committed
-  placeholders; real `*.auto.pkrvars.hcl` are gitignored.
-- `terraform/` — vSphere clone-from-template fleet; `extra_config` guestinfo identity contract;
-  `TODO(#12)` placement + `TODO(#13)` domain join; offline provider mirror (`terraform.rc`).
+- `terraform/` — thin Aria deploy root; `TF_CLI_CONFIG_FILE` points to `terraform.rc`; no secrets in
+  tfvars.
+- `module/aria-vm/` — Aria project/catalog item data sources + `vra_deployment`.
+- `packer/` — historical Packer/vSphere spike. Do not wire it back into the runner deploy CI path unless
+  explicitly requested.
 - `provisioners/` — `Invoke-Phase.ps1` (thin Packer entry → `Invoke-PhaseN`), `Register-RunnerFirstBoot.ps1`.
 - `transfer/` — `Export-Transfer.ps1` / `Import-Transfer.ps1` (git bundle + LFS CAS over USB).
 - `lib/Config.ps1` — settings; host vars read `$env:REAL_*` with `*.kayhut.com` alias defaults; artifact
@@ -134,12 +124,12 @@ Enabled in `.claude/settings.json`; the repo also ships its own `ps-reviewer` ag
   Phase 1. Guard with `[System.Diagnostics.EventLog]::SourceExists(...)` for off-host/CI runs.
 
 ## Current state & where to look
-- **`terraform` is the working branch** (Epic 2: Be1 → Packer/Terraform, implemented — see
+- **`terraform` is the working branch** (infra_tf Aria catalog deployment — see
   `docs/MIGRATION-STATUS.md`). `main` is the untouched Be1 rollback baseline.
-- Next manual step: smoke-test `packer build` + the Terraform deploy on a **lab vCenter** (reboot-resume
-  under `windows-restart`, acceptance-gate pipelines) — not runnable on the dev/internet leg.
-- Open: `TODO(#12)` vCenter placement + `TODO(#13)` domain-join facts block `terraform apply` only.
-  Acceptance-gate pipeline triggers (`ci/Invoke-AcceptanceGate.ps1`) are a lab step.
+- Next manual step: stage `dist/bin/terraform.exe` 1.0.5 + `dist/providers/` with `vmware/vra` 0.17.2,
+  set `TF_CLI_CONFIG_FILE`, set `TF_VAR_vra_refresh_token`, then run `scripts/Test-AriaTerraformPreflight.ps1`
+  inside the production network.
+- Open: confirm the real Service Broker catalog item input names/required keys and update `vm_inputs`.
 - Known issue: golden-image **version stamp is hard-coded `2.4.0`** in Config; CI `promote` now derives
   `2.x.y+<gitsha>` from the build manifest (`ci/Publish-GoldenManifest.ps1`) — see `docs/BACKLOG.md` (Epic 1).
 - Depth: `docs/ARCHITECTURE.md`, `docs/DEPENDENCIES.md`, `docs/review/REVIEW.md`/`ENV-REVIEW.md`/`BUGMAP.md`;

@@ -1,139 +1,66 @@
-# GitLab CI/CD -- Packer/Terraform golden-image pipeline (replaces the Be1 +
-# MinIO-sync pipeline). Runs on the INTERNAL GitLab (16.7.10-ee).
+# GitLab CI/CD -- infra_tf-compatible Aria catalog deployment for Windows runners.
+# GitLab 16.7.10-ee (self-managed, internal network).
 #
-# Pipeline shape (maps to the locked build-vs-deploy decisions):
-#   validate       -- static checks: PSScriptAnalyzer + verify-ps + Validate-NoAliases,
-#                     packer fmt/validate, terraform fmt/validate, and Test-BuildInputs
-#                     (repo artifacts present via Git LFS + GitLab registry reachable).
-#   build          -- `packer build` of the golden template; the BUILD-GATE
-#                     (Invoke-FinalValidation) runs inside Phase 3 and fails the build.
-#   image-test     -- ACCEPTANCE-GATE: Terraform deploys ONE runner from the fresh
-#                     template, it self-registers from guestinfo, runs representative
-#                     pipelines (incl. heavy pytest-xdist), asserts exit 0 + wall-time
-#                     <= the Be1 baseline, then destroys it.
-#   promote        -- stamp 2.x.y+<gitsha> from the build manifest (not hand-edited)
-#                     and mark the template "released".
-#   deploy         -- MANUAL: `terraform apply` to roll the fleet.
+# Required masked/protected CI variables:
+#   TF_VAR_vra_refresh_token  Aria CSP refresh token. Never commit it, pass it on
+#                             the CLI, or store it in tfvars.
+#   TF_VAR_vra_url            Optional override when not supplied by tfvars.
+#   TF_VAR_vra_insecure       Optional true/false; true only for approved
+#                             self-signed Aria endpoints.
 #
-# Secrets are CI masked/protected variables (never committed):
-#   VSPHERE_SERVER VSPHERE_USER VSPHERE_PASSWORD   (svc-packer / svc-terraform)
-#   REGISTRY_USER REGISTRY_PASS                    (GitLab Container Registry token)
-#   REAL_GITLAB_HOST REAL_GITLAB_REGISTRY          (optional alias overrides)
-# Offline mirrors are pre-staged on the runner: PACKER_PLUGIN_PATH (vsphere plugin)
-# and TF_CLI_CONFIG_FILE -> terraform/terraform.rc (provider filesystem_mirror).
+# Required repo/runtime layout on the internal leg:
+#   dist/bin/terraform.exe           Terraform 1.0.5
+#   dist/providers/                  filesystem mirror containing vmware/vra 0.17.2
+#   terraform/.terraform.lock.hcl    provider lock for vmware/vra, including windows_amd64
+#   terraform/*.auto.tfvars          non-secret environment/catalog values
 
 stages:
   - validate
-  - build
-  - image-test
-  - promote
+  - plan
   - deploy
 
-# ----------------------------------------------------------------------------
+variables:
+  TF_INPUT: "0"
+  TF_IN_AUTOMATION: "true"
+  TF_CLI_CONFIG_FILE: "$CI_PROJECT_DIR\\terraform\\terraform.rc"
+  TERRAFORM_EXE: "$CI_PROJECT_DIR\\dist\\bin\\terraform.exe"
+
 validate:
   stage: validate
   tags: [windows, docker]
   script:
-    # verify-ps is single-file -- run it over every tracked .ps1; fail if any fail.
     - powershell -NoProfile -ExecutionPolicy Bypass -Command "$bad=0; Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object { & .claude\verify-ps.ps1 -Path $_.FullName; if ($LASTEXITCODE -ne 0) { $bad++ } }; if ($bad) { exit 1 }"
     - powershell -NoProfile -ExecutionPolicy Bypass -File ci\Validate-NoAliases.ps1
-    # LFS binaries must be materialized (Test-BuildInputs + packer cd_files need
-    # real files, not pointers) and the GitLab registry reachable.
-    - git lfs pull
-    - git lfs fsck
-    - powershell -NoProfile -ExecutionPolicy Bypass -File validation\Test-BuildInputs.ps1
-    - packer fmt -check -recursive packer
-    - packer validate -var-file=packer\base\example.pkrvars.hcl packer\base
-    - packer validate -var-file=packer\golden\example.pkrvars.hcl packer\golden
-    - terraform -chdir=terraform fmt -check
-    - terraform -chdir=terraform init -backend=false
-    - terraform -chdir=terraform validate
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-AriaTerraformPreflight.ps1 -SkipAriaApi
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform init -backend=false'
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform validate'
   rules:
-    - if: $CI_COMMIT_BRANCH == "terraform"
-    - if: $CI_MERGE_REQUEST_ID
+    - if: $CI_COMMIT_BRANCH
 
-# ----------------------------------------------------------------------------
-# Base template -- MANUAL. The golden build clones `ws2019-base`, so this must
-# have run at least once (and again only when the base must change: OS patch,
-# OpenSSH, disk layout). It is deliberately not on the default path so a normal
-# pipeline doesn't rebuild the base every time.
-build-base:
-  stage: build
+plan:
+  stage: plan
   tags: [windows, docker]
   needs: [validate]
-  variables:
-    PKR_VAR_vcenter_server: $VSPHERE_SERVER
-    PKR_VAR_vcenter_username: $VSPHERE_USER
-    PKR_VAR_vcenter_password: $VSPHERE_PASSWORD
   script:
-    - packer init packer\base
-    - packer build -var "ssh_password=$BASE_SSH_PASSWORD" packer\base
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-AriaTerraformPreflight.ps1
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform init'
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform plan -out=tfplan'
+  artifacts:
+    paths:
+      - terraform/tfplan
+    expire_in: 7 days
+  rules:
+    - if: $CI_COMMIT_BRANCH
+
+deploy:
+  stage: deploy
+  tags: [windows, docker]
+  needs: [plan]
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-AriaTerraformPreflight.ps1
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform init'
+    - '& "$env:TERRAFORM_EXE" -chdir=terraform apply -auto-approve tfplan'
   rules:
     - if: $CI_COMMIT_BRANCH == "terraform"
       when: manual
       allow_failure: false
-
-# ----------------------------------------------------------------------------
-build:
-  stage: build
-  tags: [windows, docker]
-  needs: [validate]
-  variables:
-    PKR_VAR_vcenter_server: $VSPHERE_SERVER
-    PKR_VAR_vcenter_username: $VSPHERE_USER
-    PKR_VAR_vcenter_password: $VSPHERE_PASSWORD
-    PKR_VAR_registry_user: $REGISTRY_USER
-    PKR_VAR_registry_pass: $REGISTRY_PASS
-    PKR_VAR_real_gitlab_host: $REAL_GITLAB_HOST
-    PKR_VAR_real_gitlab_registry: $REAL_GITLAB_REGISTRY
-  script:
-    # Clones the `ws2019-base` template (run `build-base` once first). Materialize
-    # LFS binaries before upload, else Packer ships pointer files (B5). The
-    # build-gate (Invoke-FinalValidation) runs inside Phase 3 and fails on a bad image.
-    - git lfs pull
-    - packer init packer\golden
-    - packer build -var "repo_root=$CI_PROJECT_DIR" packer\golden
-  artifacts:
-    paths:
-      - packer/golden/manifest.json
-    expire_in: 30 days
-  rules:
-    - if: $CI_COMMIT_BRANCH == "terraform"
-
-# ----------------------------------------------------------------------------
-image-test:
-  stage: image-test
-  tags: [windows, docker]
-  needs: [build]
-  script:
-    # Deploy one runner from the freshly built template, let it self-register,
-    # run representative pipelines, assert success + wall-time, then destroy.
-    - terraform -chdir=terraform init
-    - terraform -chdir=terraform apply -auto-approve -var-file=image-test.auto.tfvars
-    - powershell -NoProfile -ExecutionPolicy Bypass -File ci\Invoke-AcceptanceGate.ps1
-    - terraform -chdir=terraform destroy -auto-approve -var-file=image-test.auto.tfvars
-  rules:
-    - if: $CI_COMMIT_BRANCH == "terraform"
-
-# ----------------------------------------------------------------------------
-promote:
-  stage: promote
-  tags: [windows, docker]
-  needs: [image-test]
-  script:
-    # Version = 2.x.y+<gitsha> derived from the manifest, NOT hand-edited.
-    - powershell -NoProfile -ExecutionPolicy Bypass -File ci\Publish-GoldenManifest.ps1 -ManifestPath packer\golden\manifest.json -GitSha $CI_COMMIT_SHORT_SHA
-  rules:
-    - if: $CI_COMMIT_BRANCH == "terraform"
-
-# ----------------------------------------------------------------------------
-deploy:
-  stage: deploy
-  tags: [windows, docker]
-  needs: [promote]
-  script:
-    - terraform -chdir=terraform init
-    - terraform -chdir=terraform apply -auto-approve
-  rules:
-    - if: $CI_COMMIT_BRANCH == "terraform"
-      when: manual

@@ -1,0 +1,18 @@
+# Terraform 1.0.5-compatible S3 backend example for MinIO-compatible state.
+# Copy to backend.tf on the internal leg after the state bucket is ready.
+# Use endpoint + force_path_style. Do not use Terraform 1.6+ endpoints {} or
+# use_path_style syntax.
+
+terraform {
+  backend "s3" {
+    bucket = "terraform-state"
+    key    = "gitlab-runners/terraform.tfstate"
+    region = "us-east-1"
+
+    endpoint         = "https://<real-minio-host>:9000"
+    force_path_style = true
+
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+  }
+}

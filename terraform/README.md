@@ -1,20 +1,66 @@
-# `terraform/` — runner fleet deploy
+# `terraform/` - Aria catalog deployment for Windows runners
 
-Terraform clones runner VMs from the Packer golden template (`../packer/`) and hands each one its identity
-at deploy time via vSphere `guestinfo` — the contract consumed at first boot by
-`../provisioners/Register-RunnerFirstBoot.ps1`:
+This Terraform root is the infra_tf-facing runner deploy surface. It does not
+talk to vCenter. It requests an existing Aria Service Broker catalog item through
+`vmware/vra` `0.17.2`, using Terraform `1.0.5` from `dist/bin/` and the provider
+mirror in `dist/providers/`.
 
-- `guestinfo.runner_token` — the GitLab runner auth/registration token.
-- `guestinfo.runner_hostname` — the runner's hostname / `name` in `config.toml`.
+## Required runtime
 
-No long-lived secret is baked into the image; secrets arrive at deploy time. Placement and domain-join
-facts are stubbed (`# TODO(#12)` / `# TODO(#13)`) and block `terraform apply` only — never the Packer
-build. Validate with `terraform validate` + `terraform fmt -check`; `terraform plan` is expected to stop
-at the unresolved `TODO(#12)` facts.
+- `dist/bin/terraform.exe` is exactly Terraform `1.0.5`.
+- `dist/providers/` contains `vmware/vra` `0.17.2` for `windows_amd64`.
+- `TF_CLI_CONFIG_FILE` points at `terraform/terraform.rc`.
+- `.terraform.lock.hcl` pins `registry.terraform.io/vmware/vra` `0.17.2`.
+- The Aria CSP refresh token is supplied only as `TF_VAR_vra_refresh_token`.
 
-**Token rotation.** `extra_config` carries `ignore_changes` (so a token isn't re-pushed on every apply),
-which means editing a token in tfvars is a **no-op**. Rotation = replace the VM:
-`terraform apply -replace='vsphere_virtual_machine.runner["runner-01"]'` — the fresh clone self-registers
-with the new token at first boot (immutable infrastructure). `registry_user`/`registry_pass` reach the
-runner via guestinfo for runtime private-image pulls; prefer a short-lived/least-priv registry token since
-guestinfo is readable in-guest.
+Do not put the refresh token in `terraform.tfvars`, `*.auto.tfvars`, command-line
+arguments, logs, or state outputs.
+
+## Aria objects that must already exist
+
+- Aria project: `project_name`
+- Service Broker catalog item: `catalog_item_name`
+- Catalog item version: `catalog_item_version`
+- Entitlement that lets the token principal request the catalog item
+- Backing cloud template and its image/flavor/network mappings, if the catalog
+  item uses those inputs
+- Project quota and lease policy that allow the runner deployment
+
+Terraform validates the project and catalog item with data sources. The preflight
+script checks local runtime/mirror/token basics and probes Aria before apply.
+
+## First run
+
+```powershell
+$env:TF_CLI_CONFIG_FILE = (Resolve-Path .\terraform\terraform.rc).ProviderPath
+$env:TF_VAR_vra_refresh_token = '<masked process env token>'
+
+.\scripts\Test-AriaTerraformPreflight.ps1
+.\dist\bin\terraform.exe -chdir=terraform init -backend=false
+.\dist\bin\terraform.exe -chdir=terraform validate
+.\dist\bin\terraform.exe -chdir=terraform plan -refresh=false
+.\dist\bin\terraform.exe -chdir=terraform plan
+```
+
+For production state, copy `backend.tf.example` to `backend.tf` on the internal
+leg and fill the MinIO/GitLab state endpoint. Keep the backend syntax Terraform
+1.0.5-compatible: `endpoint = "..."` and `force_path_style = true`; do not use
+newer `endpoints {}` or `use_path_style` syntax.
+
+## `vm_inputs`
+
+`vm_inputs` is `map(string)` on purpose. Quote every value, including numbers and
+booleans:
+
+```hcl
+vm_inputs = {
+  hostname          = "gitlab-runner-ws2019-01"
+  cpu_count         = "24"
+  memory_mb         = "65536"
+  process_isolation = "true"
+}
+```
+
+Replace the example keys with the real input names from the Service Broker
+catalog item schema. Wrong keys or wrong versions fail during the Aria request,
+so verify them with the preflight/catalog owner before apply.
