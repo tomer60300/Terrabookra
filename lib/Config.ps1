@@ -233,7 +233,13 @@ $Script:Config = @{
     }
 
     # --- Golden image version ---
-    GoldenImageVersion = '2.4.0'
+    # Derived from the repo VERSION file at load (Epic 1.2) so the in-image stamp
+    # matches the released manifest, not a stale hard-coded literal. Falls back to
+    # a dev sentinel off-host where VERSION may be absent.
+    GoldenImageVersion = $(
+        $_vf = Join-Path $PSScriptRoot '..\VERSION'
+        if (Test-Path $_vf) { (Get-Content $_vf -Raw).Trim() } else { '0.0.0-dev' }
+    )
 
     # --- Services to disable ---
     DisableServices = @(

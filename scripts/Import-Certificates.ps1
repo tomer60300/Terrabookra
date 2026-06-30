@@ -32,6 +32,18 @@ if (-not $CertsDir) { $CertsDir = 'C:\GitLab-Runner\certs' }
 $ErrorActionPreference = 'Continue'
 $source = 'GitLabRunner'
 
+# Write-EventLog errors (to the stream) if the 'GitLabRunner' source is absent --
+# it is created by Assert-Environment in Phase 1, so it can be missing off-host
+# (CI/dev). Guard on SourceExists. NOT -ErrorAction Stop: under EAP=Continue that
+# would turn a benign missing-source into a terminating throw.
+function Write-CertEvent {
+    param([int]$EventId, [string]$EntryType, [string]$Message)
+    if ([System.Diagnostics.EventLog]::SourceExists($source)) {
+        Write-EventLog -LogName Application -Source $source -EventId $EventId `
+            -EntryType $EntryType -Message $Message -ErrorAction SilentlyContinue
+    }
+}
+
 # Failure counters. This script MUST exit non-zero on any download/import
 # failure so Phase 1's $LASTEXITCODE gate aborts before writing its marker --
 # an untrusted internal CA breaks Harbor/GitLab TLS on the air-gapped runner.
@@ -65,8 +77,7 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
         } else {
             Write-Output "  [FAIL] Could not stage $certKey from repo"
             $dlFailures++
-            Write-EventLog -LogName Application -Source $source -EventId 9022 -EntryType Warning `
-                -Message "Certificate S3 download failed: $certKey"
+            Write-CertEvent -EventId 9022 -EntryType Warning -Message "Certificate S3 download failed: $certKey"
         }
     }
 } else {
@@ -112,14 +123,12 @@ foreach ($file in $certFiles) {
         $imported++
         Write-Output "  [OK] $($file.Name) -- imported to Trusted Root (thumbprint: $thumbprint, subject: $($cert.Subject))"
 
-        Write-EventLog -LogName Application -Source $source -EventId 9020 -EntryType Information `
-            -Message "Certificate imported: $($file.Name) | Subject: $($cert.Subject) | Thumbprint: $thumbprint"
+        Write-CertEvent -EventId 9020 -EntryType Information -Message "Certificate imported: $($file.Name) | Subject: $($cert.Subject) | Thumbprint: $thumbprint"
     }
     catch {
         Write-Output "  [FAIL] $($file.Name) -- $_"
         $importFailures++
-        Write-EventLog -LogName Application -Source $source -EventId 9021 -EntryType Warning `
-            -Message "Certificate import failed: $($file.Name) | Error: $_"
+        Write-CertEvent -EventId 9021 -EntryType Warning -Message "Certificate import failed: $($file.Name) | Error: $_"
     }
 }
 
