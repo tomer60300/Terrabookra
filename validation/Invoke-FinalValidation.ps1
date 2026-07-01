@@ -74,6 +74,13 @@ function Invoke-FinalValidation {
     Invoke-Check 'Docker version = 25.0'       { (docker version --format '{{.Server.Version}}' 2>$null) -match '25\.0' }
     Invoke-Check 'Docker isolation = process'  { (docker info --format '{{.Isolation}}' 2>$null) -eq 'process' }
     Invoke-Check 'Runner binary valid'         { Test-PEBinary $Script:Config.RunnerBin }
+    # First-boot registration reads the runner token+hostname from vSphere guestinfo
+    # via vmtoolsd (Register-RunnerFirstBoot Get-GuestInfo). If VMware Tools isn't in
+    # the image, every clone fails to self-register -- fail the BUILD here instead.
+    Invoke-Check 'VMware Tools (vmtoolsd) present' {
+        [bool](Get-Command vmtoolsd.exe -ErrorAction SilentlyContinue) -or
+        (Test-Path 'C:\Program Files\VMware\VMware Tools\vmtoolsd.exe')
+    }
     Invoke-Check 'Git available'               { Test-Path (Join-Path $Script:Config.GitDir 'cmd\git.exe') }
     Invoke-Check 'GIT_SSL_NO_VERIFY set'       { [System.Environment]::GetEnvironmentVariable('GIT_SSL_NO_VERIFY','Machine') -eq 'true' }
     Invoke-Check 'Defender exclusions'         { (Get-MpPreference).ExclusionPath -contains $Script:Config.RunnerDir }

@@ -112,7 +112,9 @@ Write-Result 'INFO' "repo=$RepoRoot terraform=$TerraformDir module=$ModuleDir"
 
 # 1. Exact bundled Terraform runtime.
 if (Test-Path -LiteralPath $TerraformExe) {
-    $versionText = & $TerraformExe version 2>&1 | Out-String
+    # PS5.1: `& native 2>&1` under EAP='Stop' can promote a benign stderr line to a
+    # terminating error before $LASTEXITCODE is read -- force Continue for the call.
+    $versionText = & { $ErrorActionPreference = 'Continue'; & $TerraformExe version 2>&1 } | Out-String
     if ($LASTEXITCODE -eq 0 -and $versionText -match "Terraform v$([regex]::Escape($RequiredTerraformVersion))(\s|$)") {
         Pass "Terraform binary is exactly $RequiredTerraformVersion ($TerraformExe)"
     } else {
