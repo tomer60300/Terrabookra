@@ -42,11 +42,16 @@ param(
     [Parameter(Mandatory)][string]$OutDir,
     [string]$Ref,
     [string]$Id,
-    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$RepoRoot,
     [string]$TimeStamp
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Compute the default in the BODY, not the param block: with [CmdletBinding()] +
+# a relative -File path + named args, $PSScriptRoot is empty during param-default
+# binding (Split-Path would throw). In the body it is reliably the script's dir.
+if (-not $RepoRoot) { $RepoRoot = Split-Path $PSScriptRoot -Parent }
 
 function Invoke-Git {
     # Returns git's combined output as a single STRING (never an array), so

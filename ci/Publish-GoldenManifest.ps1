@@ -22,11 +22,15 @@
 param(
     [Parameter(Mandatory)][string]$ManifestPath,
     [Parameter(Mandatory)][string]$GitSha,
-    [string]$VersionFile = (Join-Path (Split-Path $PSScriptRoot -Parent) 'VERSION'),
+    [string]$VersionFile,
     [string]$OutPath
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Compute the default in the BODY (not the param block): $PSScriptRoot is empty
+# during param-default binding under [CmdletBinding()] + relative -File + named args.
+if (-not $VersionFile) { $VersionFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'VERSION' }
 
 if (-not (Test-Path $ManifestPath)) { Write-Error "Build manifest not found: $ManifestPath"; exit 1 }
 if (-not (Test-Path $VersionFile))  { Write-Error "VERSION file not found: $VersionFile"; exit 1 }
