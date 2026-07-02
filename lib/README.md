@@ -1,10 +1,16 @@
-# lib/
+# `lib/`
 
-Shared libraries dot-sourced by `Bootstrap-GitLabRunner.ps1` before any phase runs.
+Shared PowerShell loaded by Packer phases, first boot, and validation.
 
 | File | Purpose |
-|------|---------|
-| `Config.ps1` | All settings, paths, S3 keys, thresholds, constants. **Edit this file to change configuration.** |
-| `Common.ps1` | TLS bypass, logging (`Write-Log`), S3 download (`Get-S3Object`), PE validation, phase markers, Be1 reboot, service helpers |
+| --- | --- |
+| `Config.ps1` | Source of truth for runner defaults, aliases, paths, package inventory, images, metrics ports, and phase markers. |
+| `Common.ps1` | Logging, repo-relative artifact copy helpers, PE/archive validation, service waits, DNS helper, and durable phase markers. |
 
-**Load order matters:** `Config.ps1` must be loaded before `Common.ps1` because Common reads `$Script:Config`.
+Notes:
+
+- `S3Keys` and `S3KeysExtra` are historical names. Their values are
+  repo-relative paths in the Terraform branch.
+- Logging uses `[Console]::WriteLine` so helper functions can safely return
+  booleans without log text contaminating the success stream.
+- Phase markers are durable completion markers and do not expire.

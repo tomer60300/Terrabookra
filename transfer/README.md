@@ -1,11 +1,28 @@
-# `transfer/` — air-gap code + binary hand-off
+# `transfer/`
 
-The bridge to the air-gapped Kayhut network: code travels as a git bundle, binaries as Git LFS objects over
-USB. See `Export-Transfer.ps1` (internet leg) and `Import-Transfer.ps1` (internal leg).
+Air-gap handoff scripts.
 
-- Code: `git bundle` of the branch + a `transfer/<id>` tag.
-- Binaries: the shared LFS content-addressable store (CAS) copied alongside, so LFS-tracked blobs resolve
-  on the internal mirror without internet.
-- A manifest records git SHA, bundle name, and LFS object IDs for verification on import.
+| Script | Direction | Purpose |
+| --- | --- | --- |
+| `Export-Transfer.ps1` | source leg to USB | Creates a git bundle, copies the Git LFS CAS, writes a manifest, and tags the handoff. |
+| `Import-Transfer.ps1` | USB to internal repo | Restores the LFS CAS, fetches the bundle, verifies the manifest SHA, updates the target branch, and materializes LFS files. |
 
-**Never commit real binaries.** Only config + scripts live in git here.
+Export:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File transfer\Export-Transfer.ps1 `
+  -OutDir D:\transfer `
+  -Ref terraform
+```
+
+Import:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File transfer\Import-Transfer.ps1 `
+  -InDir D:\transfer\<id> `
+  -Branch terraform
+```
+
+The transfer process moves source and LFS objects. It does not provide internal
+service credentials, Terraform provider mirrors, Packer plugins, or catalog
+configuration.

@@ -2,8 +2,8 @@
 .SYNOPSIS
     Build-input pre-flight for the Packer model: confirm the artifacts the build
     consumes are present in the uploaded repo tree (Git LFS materialized) and that
-    the GitLab host + Container Registry are reachable. Replaces the MinIO/Harbor
-    Test-Dependencies.ps1 pre-flight (MinIO retired, images now from GitLab).
+    the GitLab host + Container Registry are reachable. Replaces the retired
+    dependency pre-flight from the old artifact model.
 
 .DESCRIPTION
     Run as Phase 1 step 1.0 (build-time pre-flight) and by the CI `validate`

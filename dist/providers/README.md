@@ -1,16 +1,15 @@
 # `dist/providers/`
 
-Place the Terraform provider filesystem mirror here on the internal leg.
+Offline Terraform provider mirror.
 
 Required provider:
 
 ```text
-registry.terraform.io/vmware/vra/0.17.2/...windows_amd64...
+registry.terraform.io/vmware/vra
+version: 0.17.2
+platform: windows_amd64
 ```
 
-Generate or refresh the mirror on an internet-connected staging host, then carry
-it into the air-gapped network:
-
-```powershell
-terraform.exe providers mirror dist/providers
-```
+`terraform/terraform.rc` points Terraform at this mirror. The preflight script
+fails when the mirror is absent, the provider version is wrong, or the Windows
+package is missing.

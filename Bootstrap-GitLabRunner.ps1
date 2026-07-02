@@ -28,6 +28,6 @@ Bootstrap-GitLabRunner.ps1 is RETIRED (Be1 orchestrator removed).
 Build the image with Packer instead:
   packer build -var "repo_root=<repo>" packer/golden
 Phases run via provisioners/Invoke-Phase.ps1 -Phase <1|2|3>; first-boot
-registration via provisioners/Register-RunnerFirstBoot.ps1. See docs/MIGRATION-TO-TERRAFORM.md.
+registration via provisioners/Register-RunnerFirstBoot.ps1. See docs/ARCHITECTURE.md.
 '@
 exit 1

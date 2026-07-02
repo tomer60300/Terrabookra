@@ -1,8 +1,7 @@
 <#
 .SYNOPSIS
     Install OpenCode desktop with WebView2 prerequisite + machine-wide config.
-    HARDENED build -- proof against the exit-6 "installed but not detected"
-    failure (Cluster 2). See PATCH-NOTES.md.
+    See docs/DEPENDENCIES.md and docs/VALIDATION.md.
 
 .DESCRIPTION
     What changed vs 2.4.6/2.4.7:

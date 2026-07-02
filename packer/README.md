@@ -1,13 +1,29 @@
-# `packer/` — golden-image build (Be1 replacement)
+# `packer/`
 
-Packer is the build orchestrator (replaces VMware Aria "Be1"). It produces one **generic, unregistered**
-WS2019 GitLab-Runner golden image; Terraform (`../terraform/`) deploys + first-boot-registers runners from it.
+Packer builds the VM images. Terraform only deploys from the published Aria
+catalog item.
 
-- `base/` — `vsphere-iso` build from ISO + `autounattend.xml` that installs **and enables OpenSSH**, so the
-  **SSH communicator** connects from first boot (Packer defaults to WinRM, which is GPO-blocked at Kayhut).
-- `golden/` — `vsphere-clone` from the base template → `file` provisioner uploads the repo →
-  `../provisioners/Invoke-Phase.ps1 -Phase 1` → `windows-restart` → `-Phase 2` → `windows-restart` →
-  `-Phase 3` (build-time `Phase3-Install`) → build-gate (`Invoke-FinalValidation`).
+## Layout
 
-Air-gap: plugin versions pinned, offline `filesystem_mirror`. Validate with `packer validate` +
-`packer fmt -check` (run on a host with Packer + lab-vCenter access — not the dev/internet leg).
+| Path | Purpose |
+| --- | --- |
+| `base/` | Builds WS2019 from ISO with OpenSSH enabled. |
+| `golden/` | Clones the base template, uploads the repo, runs Phase 1/2/3, and converts to the golden runner template. |
+
+## Base build
+
+```powershell
+packer init packer\base
+packer validate -var-file packer\base\internal.auto.pkrvars.hcl packer\base\base.pkr.hcl
+packer build -var-file packer\base\internal.auto.pkrvars.hcl packer\base\base.pkr.hcl
+```
+
+## Golden build
+
+```powershell
+packer init packer\golden
+packer validate -var-file packer\golden\internal.auto.pkrvars.hcl packer\golden\golden.pkr.hcl
+packer build -var-file packer\golden\internal.auto.pkrvars.hcl packer\golden\golden.pkr.hcl
+```
+
+Both builders use the SSH communicator. WinRM is not part of this path.

@@ -3,15 +3,14 @@
     Configuration -- all settings, paths, and constants for the GitLab Runner golden image.
 
 .DESCRIPTION
-    Dot-sourced by Bootstrap-GitLabRunner.ps1 after Phase 0 downloads it from MinIO.
+    Dot-sourced by Packer phases, first boot, validation, and runtime scripts.
     Defines $Script:Config (hashtable) and resolves the data drive (E: preferred, C: fallback).
 
-    Edit the values below to match your environment. Credentials are placeholders --
-    replace before uploading to MinIO.
+    Edit the values below or supply the documented REAL_* environment overrides.
 
 .NOTES
     File: lib/Config.ps1
-    Used by: Bootstrap-GitLabRunner.ps1 (orchestrator)
+    Used by: Packer phases, first boot, validation, and runtime scripts.
 #>
 
 # ============================================================

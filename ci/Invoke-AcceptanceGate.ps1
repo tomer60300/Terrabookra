@@ -54,7 +54,7 @@ if (-not $GitLabApiUrl -or -not $GitLabApiToken -or -not $AcceptanceProjectId) {
 #     wall-time exceeds $Be1BaselineSeconds (when > 0).
 Write-Host "Acceptance gate scaffold: project=$AcceptanceProjectId tag=$RunnerTag baseline=${Be1BaselineSeconds}s"
 Write-Warning 'Acceptance-gate pipeline triggers are a lab step (internal GitLab) -- not yet implemented here.'
-Write-Warning 'Wire the representative pipelines + timing assertion on the lab vCenter; see docs/MIGRATION-STATUS.md.'
+Write-Warning 'Wire the representative pipelines + timing assertion on the lab vCenter; see docs/OPEN-ITEMS.md.'
 
 # Until implemented, do NOT signal a false PASS in real CI: exit non-zero so the
 # image-test stage is visibly pending implementation rather than silently green.

@@ -1,9 +1,9 @@
 ﻿<#
 .SYNOPSIS
-    Fetch certificates from MinIO S3 and import into the Windows Trusted Root store.
+    Stage certificates from the uploaded repo and import into the Windows Trusted Root store.
 
 .DESCRIPTION
-    1. Downloads .crt files listed in $Script:Config.S3Certs from MinIO to $CertsDir
+    1. Copies .crt files listed in $Script:Config.S3Certs from the repo to $CertsDir
     2. Scans $CertsDir for .crt, .cer, and .pem files
     3. Imports each into Cert:\LocalMachine\Root (skips already-trusted)
 
@@ -18,7 +18,7 @@
     Event IDs:
       9020 -- Certificate imported successfully
       9021 -- Certificate import failed
-      9022 -- Certificate download from S3 failed
+      9022 -- Certificate staging failed
 
     Default cert location: C:\GitLab-Runner\certs\
 #>
@@ -46,7 +46,7 @@ function Write-CertEvent {
 
 # Failure counters. This script MUST exit non-zero on any download/import
 # failure so Phase 1's $LASTEXITCODE gate aborts before writing its marker --
-# an untrusted internal CA breaks Harbor/GitLab TLS on the air-gapped runner.
+# an untrusted internal CA breaks GitLab TLS on the air-gapped runner.
 $dlFailures     = 0
 $importFailures = 0
 
@@ -62,7 +62,7 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
     foreach ($certKey in $s3Certs) {
         $fileName = Split-Path $certKey -Leaf
         $destPath = Join-Path $CertsDir $fileName
-        # Skip the S3 fetch if the cert file is already on disk with non-zero
+        # Skip the repo copy if the cert file is already on disk with non-zero
         # size. Re-running this script across phases (or after a reboot) would
         # otherwise re-download the same bytes for no reason. The trust-store
         # check below is still authoritative -- if the cert was already imported
@@ -77,11 +77,11 @@ if ($s3Certs -and $s3Certs.Count -gt 0) {
         } else {
             Write-Output "  [FAIL] Could not stage $certKey from repo"
             $dlFailures++
-            Write-CertEvent -EventId 9022 -EntryType Warning -Message "Certificate S3 download failed: $certKey"
+            Write-CertEvent -EventId 9022 -EntryType Warning -Message "Certificate staging failed: $certKey"
         }
     }
 } else {
-    Write-Output "No S3 certificate keys configured -- scanning local certs only"
+    Write-Output "No certificate paths configured -- scanning local certs only"
 }
 
 # -- Step 2: Import all certs found in CertsDir --------------

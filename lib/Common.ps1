@@ -21,7 +21,7 @@
 #>
 
 # ============================================================
-# TLS BYPASS -- Guard against re-add on Be1 re-run
+# TLS BYPASS -- Guard against re-add on repeated runs
 # ============================================================
 
 if (-not ([System.Management.Automation.PSTypeName]'TrustAllCerts').Type) {
@@ -110,8 +110,8 @@ function Get-RepoPath {
 function Copy-RepoFile {
     <#
     .SYNOPSIS  Copy an artifact from the uploaded repo tree to a destination.
-    .OUTPUTS   [bool] $true on success. Signature mirrors Get-S3Object
-               (Key/OutFile -> RelPath/OutFile) so call sites swap cleanly.
+    .OUTPUTS   [bool] $true on success. Signature mirrors the old artifact
+               helper enough that call sites remain easy to audit.
     #>
     param(
         [Parameter(Mandatory)][string]$RelPath,
@@ -137,7 +137,6 @@ function Copy-RepoFile {
 function Install-LocalBinary {
     <#
     .SYNOPSIS  Copy an EXE from the uploaded repo and validate its PE header.
-               Local-source twin of Install-S3Binary.
     .NOTES     Skip-if-exists: safe because the source (Packer-uploaded repo) is
                immutable per build. Do NOT reuse for rotation-prone artifacts
                (CA certs / bootstrap files) -- use Copy-RepoFile (always re-copies).
@@ -153,7 +152,7 @@ function Install-LocalBinary {
 
 function Install-LocalArchive {
     <#
-    .SYNOPSIS  Extract a ZIP from the uploaded repo. Local-source twin of Install-S3Archive.
+    .SYNOPSIS  Extract a ZIP from the uploaded repo.
     #>
     param([string]$RelPath, [string]$DestDir, [string]$TestFile, [string]$Label)
     if ($TestFile -and (Test-Path $TestFile)) { Write-Log "$Label already present"; return $true }

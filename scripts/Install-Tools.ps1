@@ -1,8 +1,7 @@
 <#
 .SYNOPSIS
     Generic, table-driven tool installer for the GitLab Runner golden image.
-    HARDENED build -- proof against the 2.4.7 "staged file missing/garbage"
-    failure (Cluster 1). See PATCH-NOTES.md.
+    See docs/DEPENDENCIES.md for the package inventory contract.
 
 .DESCRIPTION
     Iterates the $Script:Config.ToolPackages table (defined in lib/Config.ps1)
@@ -18,7 +17,7 @@
         installed tools, validated cache skips re-download).
       * New Test-StagedFile guard: a file is only handed to an installer after
         it is confirmed to exist, be non-empty, carry the correct magic bytes
-        (MZ / OLE2 / PK), and NOT be a MinIO XML/HTML error body saved as a
+        (MZ / OLE2 / PK), and NOT be an XML/HTML error body saved as a
         file. A cached file that fails validation is deleted and re-fetched.
 
     Idempotent: any tool whose Detect block returns truthy is skipped.
@@ -47,7 +46,7 @@ function Write-Step {
 }
 
 # ============================================================
-# CONFIG / S3 BOOTSTRAP -- when running standalone
+# CONFIG / REPO ARTIFACTS -- when running standalone
 # ============================================================
 if (-not $Script:Config) {
     if (-not $ConfigPath) {
@@ -98,7 +97,7 @@ function Get-FileKind {
 function Test-StagedFile {
     <#
     .SYNOPSIS
-        $true only if the file exists, is non-empty, is NOT a MinIO/HTML error
+        $true only if the file exists, is non-empty, is NOT an HTML/XML error
         body, and (when Kind is known) carries the correct magic bytes.
         Reads only the first 8 bytes -- safe for multi-hundred-MB archives.
     #>
@@ -265,7 +264,7 @@ foreach ($tool in $Script:Config.ToolPackages) {
         Write-Step "  Detect block raised: $($_.Exception.Message)  (treating as not installed)" 'WARN'
     }
 
-    # 2. Stage from MinIO (idempotent + validated)
+    # 2. Stage from the uploaded repo tree (idempotent + validated)
     $local = Get-LocalPath -Tool $tool
     $kind  = Get-FileKind  -Tool $tool
 

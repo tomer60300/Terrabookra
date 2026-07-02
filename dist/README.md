@@ -1,11 +1,24 @@
-# `dist/` runtime bundle
+# `dist/`
 
-The internal leg must stage the offline Terraform runtime here before any runner
-deployment:
+Internal-only runtime bundle for Terraform.
 
-- `dist/bin/terraform.exe` - Terraform `1.0.5`, `windows_amd64`.
-- `dist/providers/` - Terraform filesystem mirror containing `vmware/vra`
-  `0.17.2`, especially the `windows_amd64` package.
+Expected layout:
 
-These binaries are not committed to the public leg. `scripts/Test-AriaTerraformPreflight.ps1`
-fails early if they are missing.
+```text
+dist/
+  bin/
+    terraform.exe
+  providers/
+    registry.terraform.io/
+      vmware/
+        vra/
+          0.17.2/
+            windows_amd64/
+              terraform-provider-vra_...
+```
+
+`scripts/Test-AriaTerraformPreflight.ps1` checks this layout before Terraform
+plan/apply.
+
+The public leg does not commit these binaries. Populate them on the internal leg
+from the approved offline source.

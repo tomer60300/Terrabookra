@@ -8,10 +8,10 @@
 
     2.1  Write daemon.json (insecure registries, logging, data-root,
          and Prometheus metrics endpoint on TCP 9323)
-    2.2  Download docker.exe + dockerd.exe from MinIO
+    2.2  Copy docker.exe + dockerd.exe from the uploaded repo tree
     2.3  Register dockerd as Windows service
 
-    Reboots via Be1 if Docker service isn't running yet, otherwise continues to Phase 3.
+    Packer owns the restart after this phase.
 
 .NOTES
     File: phases/Phase2-DockerInstall.ps1
@@ -34,7 +34,7 @@ function Invoke-Phase2 {
     $dataRoot   = $Script:Config.DockerDataRoot -replace '\\', '\\'
 
     # NOTE: dns and exec-opts deliberately omitted:
-    #   dns            -- process isolation inherits host DNS (domain-joined via Be1)
+    #   dns            -- process isolation inherits host DNS on the domain-joined host
     #   exec-opts      -- isolation=process is the default on Windows Server 2019
     #   storage-driver -- windowsfilter is the implicit default on Windows (Docker 25.x rejects it)
     #

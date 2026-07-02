@@ -1,97 +1,61 @@
 ---
 name: ship
-description: Release ritual for Terrabookra — statically verify changed .ps1 files, commit as Tomer60300 (no Claude trailer), push the hardening branch, then fast-forward main. Use when the user says "ship", "ship it", "release", or asks to commit-and-push the current work following the project's git flow.
+description: Commit and push the current Terrabookra branch after running source checks. Use when the user asks to ship, commit, or push current work.
 ---
 
-# ship — Terrabookra release ritual
+# Ship current branch
 
-Run the project's commit/push flow exactly. **Idempotent:** every step is safe to
-re-run; if there is nothing to do (clean tree, branch already pushed, main already
-even), say so and move on. **Print each step** as you go: `STEP n: ...` then the
-command and its result.
+This project uses the current checked-out branch as the push target. Do not
+fast-forward `main` unless the user explicitly asks.
 
-This is the **public dev leg** — GitHub only; MinIO/Harbor/Be1/GitLab are
-unreachable, so verification is static. PowerShell 5.1 is the target: verify with
-`powershell.exe`, never `pwsh`.
+## Step 1: Inspect state
 
-## STEP 1 — Verify changed .ps1 files (static)
-
-List changed/added `.ps1` files vs the merge target:
-
-```
-git diff --name-only --diff-filter=d HEAD -- "*.ps1"
-git diff --name-only --diff-filter=d --cached -- "*.ps1"
-git ls-files --others --exclude-standard -- "*.ps1"
+```powershell
+git status -sb
+git branch --show-current
+git log -1 --oneline
 ```
 
-For each unique path, run the verifier on the 5.1 engine and check the exit code:
+Confirm the branch and changed files match the user's request.
 
-```
+## Step 2: Verify
+
+For changed PowerShell files, run:
+
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude\verify-ps.ps1 -Path <file>
 ```
 
-If any file exits non-zero (parse error or analyzer Error), **STOP** — report the
-findings and do not commit. If no `.ps1` changed, print "no .ps1 changes to verify"
-and continue.
+For broad source changes, prefer:
 
-## STEP 2 — Be on the hardening branch
-
-```
-git rev-parse --abbrev-ref HEAD
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ci\Validate-NoAliases.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\Test-AriaTerraformPreflight.ps1 -SkipAriaApi
 ```
 
-If not on `hardening/2.4.6-cluster-and-review`, check it out
-(`git checkout hardening/2.4.6-cluster-and-review`). All commits land here, never
-directly on `main`.
+Report any environmental failures separately from source failures.
 
-## STEP 3 — Commit as Tomer60300 (no trailer)
+## Step 3: Commit
 
-Stage the intended files, then commit with the project identity and **no** Claude /
-Co-Authored-By / "Generated with" trailer. Write the message to a temp file and use
-`-F` so the body is exact:
+Use the project identity when possible and do not add AI-generated trailers.
 
-```
+```powershell
 git add <paths>
-git -c user.name='Tomer60300' -c user.email='Tomer60300@gmail.com' commit -F <msgfile>
+git -c user.name='Tomer60300' -c user.email='Tomer60300@gmail.com' commit -m "<message>"
 ```
 
-If `git status` shows nothing staged/changed, print "nothing to commit" and skip to
-STEP 5 (the branch may just need pushing).
+## Step 4: Push
 
-## STEP 4 — Push the hardening branch
-
-**Export the push token first.** The repo is **public**, so reads / `ls-remote`
-succeed even with a bad or empty token — a failed *push* is the only real signal,
-and the credential helper sends an **empty password** if the token var isn't
-exported. So, before pushing, ensure the GitHub token is exported in the
-environment (this session's var is `GITHUB_TOKEN`):
-
-```
-# bash:        export GITHUB_TOKEN=...    # PowerShell: $env:GITHUB_TOKEN = '...'
-git push origin hardening/2.4.6-cluster-and-review
+```powershell
+git push origin HEAD
 ```
 
-Confirm the push reports an updated ref (or "Everything up-to-date"). Do **not**
-conclude "token revoked" from a failed push alone — re-check that the token is
-exported and non-empty first.
+If the branch has no upstream, push with:
 
-## STEP 5 — Fast-forward main
-
-`main` only ever fast-forwards from the hardening branch — never a separate commit,
-never a merge commit:
-
-```
-git checkout main
-git merge --ff-only hardening/2.4.6-cluster-and-review
-git push origin main
-git checkout hardening/2.4.6-cluster-and-review
+```powershell
+git push -u origin HEAD
 ```
 
-If the fast-forward is refused, the branches have diverged — stop and report;
-do not force.
+## Step 5: Report
 
-## STEP 6 — Report
-
-Print: branch, the commit SHA(s) that landed, push results for both refs, and that
-`main` is even with the hardening branch. End by leaving the working branch checked
-out as `hardening/2.4.6-cluster-and-review`.
+Return the branch, commit SHA, push target, and checks run.

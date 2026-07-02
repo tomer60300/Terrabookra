@@ -2,17 +2,14 @@
 .SYNOPSIS
     Install observability stack: windows_exporter + blackbox_exporter, and open
     firewall holes for runner (:9252) and Docker (:9323) metrics.
-    HARDENED build -- proof against the "service not running" validation
-    failures (Cluster 3). See PATCH-NOTES.md.
+    See docs/DEPENDENCIES.md and docs/VALIDATION.md.
 
 .DESCRIPTION
     What changed vs 2.4.6/2.4.7:
-      * Self-staging fallback. If the exporter MSI/ZIP is not on disk (because
-        the Phase 3 staging step discarded the Get-S3Object result with
-        '| Out-Null' and silently failed), this script now locates Config.ps1 +
-        Common.ps1 and downloads the binaries itself from the configured S3
-        keys before giving up.
-      * Magic-byte validation before install (rejects 0-byte / MinIO XML error
+      * Self-staging fallback. If the exporter MSI/ZIP is not on disk, this
+        script locates Config.ps1 + Common.ps1 and copies the binaries from the
+        uploaded repo tree before giving up.
+      * Magic-byte validation before install (rejects 0-byte / HTML/XML error
         bodies saved as a file).
       * Services are started with a retry+verify loop and a clear PASS/FAIL
         line, instead of a fire-and-forget Start-Service that hid failures.
@@ -23,8 +20,8 @@
 .PARAMETER WindowsExporterMsi    Local path to the staged windows_exporter MSI.
 .PARAMETER BlackboxExporterZip   Local path to the staged blackbox_exporter zip.
 .PARAMETER BlackboxInstallDir    Where blackbox_exporter is extracted (NO spaces).
-.PARAMETER WindowsExporterS3Key  MinIO key, used only for the self-staging fallback.
-.PARAMETER BlackboxExporterS3Key MinIO key, used only for the self-staging fallback.
+.PARAMETER WindowsExporterS3Key  Repo-relative path, used only for the self-staging fallback.
+.PARAMETER BlackboxExporterS3Key Repo-relative path, used only for the self-staging fallback.
 
 .NOTES
     File:        scripts/Install-Observability.ps1
@@ -56,7 +53,7 @@ function Write-Step {
 }
 
 # ============================================================
-# CONFIG / S3 BOOTSTRAP -- enables the self-staging fallback
+# CONFIG / REPO ARTIFACTS -- enables the self-staging fallback
 # ============================================================
 if (-not $Script:Config) {
     if (-not $ConfigPath) {

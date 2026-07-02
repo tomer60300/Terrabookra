@@ -2,7 +2,7 @@
 .SYNOPSIS
     Fail-fast environment preflight. Asserts every precondition the bootstrap
     flow CONSUMES but does not itself create, so an unknown VM fails loudly and
-    early instead of cryptically and deep. See ENV-REVIEW.md.
+    early instead of cryptically and deep. See docs/VALIDATION.md.
 
 .DESCRIPTION
     Run this as the very first step of provisioning -- ideally from
@@ -214,7 +214,7 @@ if ($Script:Config -and $parsed) {
         if ($iar.AsyncWaitHandle.WaitOne(3000) -and $tcp.Connected) {
             Write-Check PASS "GitLab endpoint reachable ($epHost`:$epPort)"
         } else {
-            Write-Check WARN "GitLab endpoint ${epHost}:${epPort} not reachable in 3s -- check DNS/hosts/network (Test-Dependencies probes deeper)"
+            Write-Check WARN "GitLab endpoint ${epHost}:${epPort} not reachable in 3s -- check DNS/hosts/network (Test-BuildInputs probes deeper)"
         }
         $tcp.Close()
     } catch { Write-Check WARN "GitLab endpoint ${epHost}:${epPort} probe error: $($_.Exception.Message)" }

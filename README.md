@@ -1,182 +1,100 @@
-# Terrabookra — GitLab Runner Golden Image (Windows)
+# Terrabookra
 
-Automated provisioning of GitLab Runner VMs for an air-gapped Windows Server 2019 environment.
+Terrabookra builds and deploys Windows Server 2019 GitLab Runner machines for an
+air-gapped network.
 
-> **`terraform` branch:** runner deployment is now the infra_tf-compatible **Aria Service Broker
-> catalog path**. Terraform `1.0.5` uses `vmware/vra` `0.17.2` from the offline mirror, requests an
-> existing Windows-runner catalog item, and passes string-only `vm_inputs`. The Aria CSP refresh token
-> is supplied only through `TF_VAR_vra_refresh_token`. The old Packer/vSphere spike remains in the tree
-> as historical work, but it is no longer the CI deploy path for runners. `main` remains the Be1 rollback
-> baseline and matches the older description below.
-> See `docs/MIGRATION-TO-TERRAFORM.md` + `docs/MIGRATION-STATUS.md`.
+The current working branch is `terraform`. In this branch the deployment model is:
 
-On `main`, a single orchestrator (`Bootstrap-GitLabRunner.ps1`) is executed by VMware Aria (Be1) on a
-freshly provisioned VM and dispatches modular phases that produce a fully operational GitLab Runner.
+1. Code and Git LFS artifacts are transferred into the private network.
+2. Packer builds a base WS2019 template with OpenSSH.
+3. Packer builds a generic, unregistered golden runner template from that base.
+4. Terraform requests an existing VMware Aria Service Broker catalog item.
+5. The deployed clone registers itself on first boot from VMware guestinfo,
+   environment variables, or `C:\GitLab-Runner\firstboot.json`.
 
----
+The old Be1/MinIO self-fetch bootstrap path is retired here. `Bootstrap-GitLabRunner.ps1`
+is a compatibility stub, not the active provisioner.
 
-## Stack
+## Current contracts
 
-| Component | Version |
-|-----------|---------|
-| Host OS | Windows Server 2019 LTSC (Build 17763) |
-| GitLab | 16.7.10-ee (self-managed) |
-| GitLab Runner | 16.7.0 |
-| Docker | 25.0.15 (raw binaries, process isolation) |
-| Container images | GitLab Container Registry (`terraform` branch; Harbor on `main`) |
-| Artifact store | Git LFS + uploaded repo (`terraform` branch; MinIO S3 on `main`) |
-| Build / deploy | Aria Service Broker catalog via Terraform (`terraform` branch; VMware Aria/Be1 on `main`) |
+- OS: Windows Server 2019 LTSC, build `17763`.
+- Container runtime: Docker 25.x, `docker-windows`, process isolation.
+- Runner: GitLab Runner `16.7.0`.
+- Terraform: `1.0.5`.
+- Terraform provider: `vmware/vra` `0.17.2` from the offline provider mirror.
+- Packer vSphere plugin: `github.com/hashicorp/vsphere` `1.4.0`.
+- Remote control plane: OpenSSH. WinRM is not part of the runtime path.
+- Runtime images: GitLab Container Registry.
+- Runtime/build binaries: repo files and Git LFS, not MinIO.
 
----
+## Read first
 
-## Repository Structure
+- [Documentation index](docs/INDEX.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration model](docs/CONFIGURATION.md)
+- [Air-gap transfer](docs/AIRGAP-TRANSFER.md)
+- [Build runbook](docs/BUILD.md)
+- [Deployment runbook](docs/DEPLOYMENT.md)
+- [Validation gates](docs/VALIDATION.md)
+- [Operations](docs/OPERATIONS.md)
+- [Open items](docs/OPEN-ITEMS.md)
 
-```
-Terrabookra/
-├── Bootstrap-GitLabRunner.ps1              # Orchestrator: load modules, detect phase, dispatch
-│
-├── lib/                                  # Shared libraries (dot-sourced by orchestrator)
-│   ├── Config.ps1                        # All settings, paths, S3 keys, constants
-│   └── Common.ps1                        # TLS bypass, logging, S3 download, PE validation,
-│                                         #   phase markers, reboot, service helpers
-│
-├── phases/                               # One file per phase — self-contained logic
-│   ├── Phase1-SystemPrep.ps1             # Services, power, pagefile, env, dirs, Windows features
-│   ├── Phase2-DockerInstall.ps1          # daemon.json, Docker binaries, dockerd service
-│   └── Phase3-RunnerSetup.ps1            # Docker verify, runner, images, config, maintenance, tools
-│
-├── validation/
-│   └── Invoke-FinalValidation.ps1        # 17-check validation suite
-│
-├── scripts/                              # Maintenance scripts (deployed to C:\GitLab-Runner\scripts)
-│   ├── health-check.ps1                  # Service & disk health (every 5 min)
-│   ├── docker-watchdog.ps1               # Auto-restart Docker if unresponsive (every 5 min)
-│   ├── disk-monitor.ps1                  # Emergency prune on low disk (every 30 min)
-│   ├── kill-stale-containers.ps1         # Kill containers running > 4 hours (every 2 h)
-│   └── Register-ScheduledTasks.ps1       # Creates all 10 scheduled tasks
-│
-├── binaries/                             # README only (stored in MinIO, not Git)
-├── tools/                                # README only (stored in MinIO, not Git)
-│
-├── docs/
-│   ├── ARCHITECTURE.md                   # System architecture and phase details
-│   └── INTERNET-PC-CHECKLIST.md          # Download list for USB transfer
-│
-└── CHANGELOG.md
-```
+## Repository map
 
----
+| Path | Purpose |
+| --- | --- |
+| `.gitlab-ci.yml` | Internal GitLab CI for validate, plan, and manual deploy. |
+| `.claude/verify-ps.ps1` | Windows PowerShell 5.1 parser and PSScriptAnalyzer gate. |
+| `binaries/` | LFS-tracked runtime binaries such as Docker and GitLab Runner. |
+| `ci/` | CI helper scripts. |
+| `dist/` | Offline Terraform runtime and provider mirror, populated only internally. |
+| `fleet/` | SSH-based fleet inspection and command helpers. |
+| `lib/` | Shared configuration and helpers. |
+| `module/aria-vm/` | Terraform module wrapping an Aria catalog deployment. |
+| `packer/` | Base and golden-image Packer templates. |
+| `phases/` | Build-time provisioning phases run by Packer. |
+| `provisioners/` | Packer phase entrypoint and first-boot runner registration. |
+| `scripts/` | Maintenance, observability, SSH, tooling, and diagnostics scripts. |
+| `terraform/` | Terraform root module for Aria deployment. |
+| `transfer/` | Git bundle and LFS CAS transfer tools for the air gap. |
+| `validation/` | Build-input, build-gate, and deploy-gate validation. |
 
-## Modular Design
+## Internal quick path
 
-The project follows a **manager/worker pattern**. The orchestrator (`Bootstrap-GitLabRunner.ps1`) is compact — it loads libraries and dispatches to the correct phase. Each module has a single responsibility:
+From the internal GitLab leg, after importing the transfer bundle and populating
+the offline binary/provider content:
 
-| File | Responsibility | Lines |
-|------|---------------|-------|
-| `Bootstrap-GitLabRunner.ps1` | Load modules, detect phase, dispatch | ~80 |
-| `lib/Config.ps1` | All configuration in one place | ~100 |
-| `lib/Common.ps1` | Shared helpers (S3, logging, TLS, etc.) | ~200 |
-| `phases/Phase1-SystemPrep.ps1` | System preparation | ~100 |
-| `phases/Phase2-DockerInstall.ps1` | Docker installation | ~80 |
-| `phases/Phase3-RunnerSetup.ps1` | Runner setup + maintenance | ~200 |
-| `validation/Invoke-FinalValidation.ps1` | 17-check validation | ~60 |
+```powershell
+git lfs checkout
 
-**Why modular?** When something breaks on an air-gapped VM, you need to know exactly which file and which step failed. Each phase logs step numbers (1.1, 2.1, 3.1, etc.) so the install log tells you precisely where to look.
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude\verify-ps.ps1 -Path .\phases\Phase1-SystemPrep.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-AriaTerraformPreflight.ps1 -SkipAriaApi
 
----
+packer init packer\base
+packer validate -var-file packer\base\internal.auto.pkrvars.hcl packer\base\base.pkr.hcl
 
-## How It Works
+packer init packer\golden
+packer validate -var-file packer\golden\internal.auto.pkrvars.hcl packer\golden\golden.pkr.hcl
 
-The orchestrator is re-run from the top after each Be1 reboot. Marker files determine where to resume:
-
-```
-Be1 runs Bootstrap-GitLabRunner.ps1
-    │
-    ├─ dot-source lib/Config.ps1        (settings)
-    ├─ dot-source lib/Common.ps1        (helpers)
-    ├─ dot-source phases/*.ps1          (phase functions)
-    ├─ dot-source validation/*.ps1      (validation)
-    │
-    ├─ .phase2_complete exists? ──► Invoke-Phase3
-    ├─ .phase1_complete exists? ──► Invoke-Phase2
-    └─ No markers?             ──► Invoke-Phase1
+$env:TF_CLI_CONFIG_FILE = "$PWD\terraform\terraform.rc"
+$env:TF_VAR_vra_refresh_token = '<masked CI or process secret>'
+dist\bin\terraform.exe -chdir=terraform init
+dist\bin\terraform.exe -chdir=terraform plan -out=tfplan
 ```
 
-1. **Phase 1** — System prep → reboot if Windows features needed
-2. **Phase 2** — Docker install → reboot if dockerd not ready
-3. **Phase 3** — Runner + maintenance + validation → done
+Use the GitLab CI pipeline for the normal path; the commands above are for
+operator orientation and troubleshooting.
 
----
+## Retired concepts
 
-## Disk Layout
+These names may still appear in old commit history, but they are not the active
+runtime model on this branch:
 
-| Drive | Size | Purpose |
-|-------|------|---------|
-| `C:` | 100 GB | OS, runner binary, tools, scripts |
-| `E:` | 1 TB | Docker data-root, pagefile, builds, cache |
+- Be1 post-install phase dispatcher.
+- MinIO/S3 script download during provisioning.
+- Harbor image source.
+- `exit 3010` reboot/resume contract.
+- Runner registration during golden-image build.
 
-If `E:` is not present, everything falls back to `C:`.
-
----
-
-## Configuration
-
-Edit `lib/Config.ps1`:
-
-- **MinIO credentials** — `MinioAccessKey` / `MinioSecretKey`
-- **Harbor credentials** — `HarborUser` / `HarborPass`
-- **Concurrency** — `ConcurrentJobs` (default: 2)
-- **Runner token** — injected by Be1 as `GITLAB_RUNNER_TOKEN` env var
-
----
-
-## Infrastructure Endpoints
-
-| Service | URL |
-|---------|-----|
-| GitLab | `https://gitlab.kayhut.com` |
-| Harbor | `https://harbor.kayhut.com` |
-| MinIO S3 API | `https://kayhut-minio.com:9000` |
-| MinIO Console | `https://kay-minio.kayhut.com:9001` |
-| Artifactory | `https://artifactory-prod` |
-| Be1 (VMware Aria) | `https://be1.kayhut.com` |
-
-All services use self-signed certificates. TLS validation is bypassed throughout.
-
----
-
-## Scheduled Maintenance Tasks
-
-| Task | Schedule | Purpose |
-|------|----------|---------|
-| Docker-Image-Prune | Daily 03:00 | Remove unused images older than 7 days |
-| Docker-Container-Cleanup | Every 4 h | Prune stopped containers |
-| Docker-Stale-Container-Kill | Every 2 h | Kill containers running > 4 hours |
-| Docker-Volume-Prune | Daily 03:30 | Prune orphan volumes |
-| Docker-BuildCache-Prune | Weekly Sun 04:00 | Clear build cache |
-| Runner-Workspace-Cleanup | Daily 04:00 | Delete build dirs older than 3 days |
-| Disk-Space-Monitor | Every 30 min | Emergency prune if disk < 10 GB |
-| Docker-Daemon-Watchdog | Every 5 min | Restart Docker if unresponsive |
-| Runner-Service-Watchdog | Every 5 min | Restart Runner if stopped |
-| Log-Rotation | Weekly Sun 05:00 | Rotate logs larger than 50 MB |
-
----
-
-## Event Log IDs
-
-All events → Application log, source `GitLabRunner`:
-
-| ID | Level | Meaning |
-|----|-------|---------|
-| 9001 | Error | Critical disk — emergency prune executed |
-| 9002 | Warning | Low disk space warning |
-| 9003 | Error | Docker daemon restarted by watchdog |
-| 9004 | Warning | Runner service restarted by watchdog |
-| 9005 | Error | Docker daemon unresponsive (health check) |
-| 9006 | Error | Runner service not running (health check) |
-| 9007 | Warning | Low disk space (health check) |
-| 9008 | Warning | Stale containers detected |
-| 9009 | Error | Docker restart failed |
-| 9010 | Warning | Final validation — some checks failed |
-| 9011 | Info | Final validation — all checks passed |
-| 9012 | Warning | Stale containers killed |
+The active source of truth is the code under `packer/`, `phases/`,
+`provisioners/`, `lib/`, `terraform/`, `module/aria-vm/`, and `validation/`.

@@ -1,10 +1,20 @@
-# validation/
+# `validation/`
 
-Post-install validation suite.
+Validation scripts shared by CI, Packer, and first boot.
 
-| File | Function | Called by |
-|------|----------|-----------|
-| `Invoke-FinalValidation.ps1` | `Invoke-FinalValidation` | Phase 3 (step 3.12) |
+| Script | Purpose |
+| --- | --- |
+| `Test-BuildInputs.ps1` | Checks repo-relative artifacts from `Config.ps1` and detects unsmudged Git LFS pointer files. Can also probe GitLab and registry reachability. |
+| `Invoke-FinalValidation.ps1` | Provides the build-gate (`Invoke-FinalValidation`) and deploy-gate (`Test-RunnerRegistered`). |
 
-Runs 17 checks against OS, Docker, Runner, Git, Defender, scheduled tasks, and disk.
-Results are logged to `install.log` and to the Application Event Log (event 9010 or 9011).
+Build-gate:
+
+- runs during Phase 3 of the Packer golden build.
+- checks image correctness.
+- does not require runner registration.
+
+Deploy-gate:
+
+- runs during first boot after registration.
+- checks runner service, runner verify, scheduled tasks, SSH, exporters, and firewall.
+- controls whether `.firstboot_complete` is written.

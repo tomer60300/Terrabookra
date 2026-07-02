@@ -4,7 +4,7 @@
     maintenance + tooling + observability, config.toml skeleton, build-gate.
 
 .DESCRIPTION
-    The build-time half of the former Phase3-RunnerSetup. Produces a GENERIC,
+    Build-time golden-image installation. Produces a GENERIC,
     UNREGISTERED golden image: the runner binary is installed and a token-LESS
     config.toml skeleton is written, but NO token is resolved, NO registration is
     performed, and the runner Windows service is NOT installed or started. Those

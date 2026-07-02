@@ -3,10 +3,10 @@
     Phase 1 -- System preparation, services, environment, Windows features.
 
 .DESCRIPTION
-    Called by Bootstrap-GitLabRunner.ps1 when no phase markers exist.
+    Called by provisioners/Invoke-Phase.ps1 during the Packer golden-image build.
     Prepares the VM for Docker and Runner installation:
 
-    1.0  Pre-flight dependency validation (DNS, S3, Harbor)
+    1.0  Pre-flight build-input validation
     1.1  Register Event Log source
     1.2  Disable unnecessary Windows services (17 services)
     1.3  Set High Performance power plan
@@ -23,7 +23,7 @@
          WinRM step which was blocked by domain GPO)
     1.12 Enable RDP audit policy
 
-    Reboots via Be1 if features required it, otherwise continues to Phase 2.
+    Packer owns the restart after this phase.
 
 .NOTES
     File: phases/Phase1-SystemPrep.ps1
@@ -173,7 +173,7 @@ function Invoke-Phase1 {
         if (-not $vtExposed) {
             Write-LogWarn 'Hyper-V SKIPPED: CPU does not expose hardware virtualization (host-side nested-virt setting).'
             Write-LogWarn '  Runner will operate with docker-windows process isolation only (which does NOT need Hyper-V).'
-            Write-LogWarn '  To enable Hyper-V isolation later: enable "Expose hardware assisted virtualization to the guest OS" on the VM in vSphere/Be1 template, then re-run this phase.'
+            Write-LogWarn '  To enable Hyper-V isolation later: expose hardware virtualization on the VM/template, then re-run this phase.'
             "skipped at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -- VT-x not exposed by host" |
                 Out-File -FilePath $Script:Config.HyperVSkippedMarker -Encoding UTF8 -Force
         } else {
@@ -216,7 +216,7 @@ function Invoke-Phase1 {
     # runner. sshd hands password attempts to the Windows logon stack which
     # validates against the domain controller. A public-key fallback is
     # optionally seeded from administrators_authorized_keys (skipped if the
-    # file isn't staged in MinIO).
+    # file is not staged in the uploaded repo).
     Write-Log '1.11 Enable OpenSSH server (remote control plane)'
 
     # Stage zip + authorized_keys from the uploaded repo into C:\Tools\openssh\

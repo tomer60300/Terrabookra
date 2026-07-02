@@ -1,10 +1,10 @@
 ﻿<#
 .SYNOPSIS
     Register all maintenance scheduled tasks for the GitLab Runner golden image.
-    HARDENED build. See REVIEW.md (M1, M2) + BUGMAP.md (C1).
+    See docs/OPERATIONS.md for the task inventory.
 
 .DESCRIPTION
-    Run once during Phase 3 of Bootstrap-GitLabRunner.ps1.
+    Run once during Phase 3 of the Packer golden-image build.
     Creates 13 scheduled tasks under SYSTEM for Docker cleanup, disk monitoring,
     service watchdogs, log rotation, network monitoring, RDP audit, and health check.
 
